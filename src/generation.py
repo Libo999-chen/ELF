@@ -2,7 +2,10 @@ import time
 import os
 import json
 import itertools
-import wandb
+try:
+    import wandb
+except Exception:  # wandb is optional; only required when config.use_wandb is True
+    wandb = None
 from tqdm import tqdm
 
 import jax

@@ -8,12 +8,17 @@ import logging
 import os
 import sys
 
-# Initialize JAX distributed BEFORE importing other JAX modules
+# Initialize JAX distributed BEFORE importing other JAX modules.
+# Only when a real multi-process launcher is present; otherwise skip entirely.
+# (On a single-host GPU box, jax.distributed.initialize() probes cloud/TPU metadata
+# and raises non-RuntimeError network errors, so we must not call it.)
+import os as _os
 import jax
-try:
-    jax.distributed.initialize()
-except (RuntimeError, ValueError):
-    pass  # Single-host run, or already initialized.
+if _os.environ.get("WORLD_SIZE") not in (None, "", "1") or "JAX_COORDINATOR_ADDRESS" in _os.environ:
+    try:
+        jax.distributed.initialize()
+    except Exception:
+        pass  # Single-host run, or already initialized.
 
 # Ensure repo root on sys.path so imports work when run as a script
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

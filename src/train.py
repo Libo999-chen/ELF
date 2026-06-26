@@ -10,12 +10,49 @@ import sys
 import time
 from functools import partial
 
-# Initialize JAX distributed BEFORE importing other JAX modules
+
+def _configure_distributed_runtime():
+    """Make the training script compatible with torchrun-style launchers.
+
+    torchrun exports WORLD_SIZE/RANK/LOCAL_RANK/LOCAL_WORLD_SIZE/MASTER_ADDR/MASTER_PORT.
+    We map those into the environment variables that JAX distributed initialization expects.
+    """
+    if "WORLD_SIZE" in os.environ:
+        os.environ.setdefault("JAX_NUM_PROCESSES", os.environ["WORLD_SIZE"])
+    if "RANK" in os.environ:
+        os.environ.setdefault("JAX_PROCESS_ID", os.environ["RANK"])
+    if "LOCAL_RANK" in os.environ:
+        os.environ.setdefault("JAX_LOCAL_PROCESS_ID", os.environ["LOCAL_RANK"])
+    if "LOCAL_WORLD_SIZE" in os.environ:
+        os.environ.setdefault("JAX_LOCAL_PROCESS_COUNT", os.environ["LOCAL_WORLD_SIZE"])
+    if "MASTER_ADDR" in os.environ and "MASTER_PORT" in os.environ:
+        os.environ.setdefault(
+            "JAX_COORDINATOR_ADDRESS",
+            f"{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}",
+        )
+
+
+_configure_distributed_runtime()
+
+# Bind each torchrun process to its assigned GPU when available.
+import os
+if "CUDA_VISIBLE_DEVICES" not in os.environ and "LOCAL_RANK" in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ.get("LOCAL_RANK", "0")
+
+# Initialize JAX distributed BEFORE importing other JAX modules.
+# When torchrun is used, prefer the explicit process information it exports
+# instead of letting JAX auto-detect distributed settings and probe TPU metadata.
 import jax
-try:
-    jax.distributed.initialize()
-except (RuntimeError, ValueError):
-    pass  # Single-host run, or already initialized.
+
+
+def _initialize_jax_distributed():
+    # This environment is a local single-host GPU machine. JAX's distributed
+    # initialization attempts cloud TPU metadata probing and fails here, so we
+    # skip it entirely and rely on the single-process/local-device behavior.
+    return
+
+
+_initialize_jax_distributed()
 
 # Ensure repo root on sys.path so imports work when run as a script
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +65,10 @@ from flax import jax_utils
 from flax.training.common_utils import get_metrics, shard
 from tqdm import tqdm
 from transformers import AutoTokenizer
-import wandb
+try:
+    import wandb
+except Exception:  # wandb is optional; only required when config.use_wandb is True
+    wandb = None
 
 from modules.t5_encoder import get_encoder
 from utils.logging_utils import log_for_0
@@ -88,6 +128,7 @@ def run_training(config):
     log_for_0(f"Number of epochs: {config.epochs}")
     log_for_0(f"JAX devices: {jax.device_count()}")
     log_for_0(f"JAX backend: {jax.default_backend()}")
+    log_for_0(f"Distributed process index/count: {jax.process_index()}/{jax.process_count()}")
     log_for_0("=" * 60)
 
     # Initialize wandb

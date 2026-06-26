@@ -1,0 +1,49 @@
+======================================================================
+采样配置 A:SDE 32 步 (cfg=1, sc-cfg=3, gamma=1.5)
+file: /mnt/faster3/lc2762/elf_tinystories_output/sde-steps32-cfg1-sccfg3-ts_logit_normal-gamma1.5-uncond/all_generated_50_6250.jsonl
+======================================================================
+[1] Once the were of of together together together together together together . all all enjoyed together the friends and both friends all had had adventures many adventures. Every Everyone had
+----------------------------------------------------------------------
+[2] Once upon
+----------------------------------------------------------------------
+[3] Once lived of the family friends and loved.. of did things of were promised. Everyone The friends were worked together. The Everyone would promised all every many to friends make to show together. the the the together.. a of had to had had.. make all them.
+----------------------------------------------------------------------
+[4] Once and friends were a friends loved friends loved together very adventures. From day on had fun things of things things on of things. From they had did on things and learned all. They kept keep to they like the likes and all all of friends.
+----------------------------------------------------------------------
+[5] Once lived lived adventures played the friends were adventures together. They shared together together. and played together together spent
+----------------------------------------------------------------------
+[6] Once had had had friends had had enjoyed on together togethers would together together together.. all together together. They had together all enjoyed all all together all on... the things to things make together together. the Everyone had the many... together. together together they were the the them them were together together. they all they all them had
+----------------------------------------------------------------------
+[7] Once upon, there there lived
+----------------------------------------------------------------------
+[8] Once upon time
+----------------------------------------------------------------------
+[9] Once
+----------------------------------------------------------------------
+[10] Once had to would friends together on enjoyed.. would the togethers like thingss likess. like like them thingss things make like. they like like like like like likess and laughed. The had had
+----------------------------------------------------------------------
+
+======================================================================
+采样配置 B:SDE 64 步 (cfg=1, sc-cfg=3, gamma=1.0)
+file: /mnt/faster3/lc2762/elf_tinystories_output/sde-steps64-cfg1-sccfg3-ts_logit_normal-gamma1.0-uncond/all_generated_50_6250.jsonl
+======================================================================
+[1] Jane and had were many things of of likes. They would liked did did. Every they all the things made a big of things. The they. They would make like of of things things and things. They would hard to things all they do on things things things of things are hard. because they do they have to of together together. Every they would worked together every things all they together on the things and the together. They were both were did like fun. The family would like pictures and had they. like of of of things. " they them and and say like say of of their friends. The the cars were so hard and did had The end of things were like to of the friends. " did had had on things one one one of the big there. because they had like like of of together. They did like like the am like like of like of of one one. From soon had
+----------------------------------------------------------------------
+[2] Once upon, upon time time,, two little friends loved loved loved happy friends. They would loved many had to friends very " their " their and to things to they together. He would would together together they together, the. make make friends together all the them they were things or hard. they were say together. The all, told she felt like like like one like things that the things like had a best too. Jane wouldged them his mommy and had learned all of one all of one of, ofy! because what do they am be very very very better. From end of seen. Every like like like of of together, like things like like like of together. Every even of like like together with
+----------------------------------------------------------------------
+[3] Once upon time lived wonderful kind friends. had were kind of friends. Together Everyone and Everyone would shared others shared make things things work.. Everyone worked worked to worked together make make of fun adventures. They all both happy together
+----------------------------------------------------------------------
+[4] Once had many of animals and They promised together together. They were felt wonderful that they would keep together to the likes and friends friends. The Everyone both had many manys had on on on together together the together. They both would like they like their their together. and learned did did they were so hard of others were so much much of do they do. From the friends had enjoyed many to had adventures before had them. things them were together alls. They had were were like like ofs. They had had fun enjoyed together together, Everyone both both had
+----------------------------------------------------------------------
+[5] Once upon upon,, there were lived lived friendly friends. Thely. They like like loved animals. like like like like like like the colorsss, they felt like and played down. They would likes them. They keep all them cars like they make like beautiful!
+----------------------------------------------------------------------
+[6] Once upon,,, there was friends was happy friends. because they had special new they were too friends. From would friends to they were good like the animals. Every The all a friends worked and made on on on friends. a friends. all that they had keep friends. all them like things like the things. They promised about the other of they like make and started laughed! and had lot fun adventures of the end, make like like like better.
+----------------------------------------------------------------------
+[7] Once upon a little girl named the friends. The littlely who loved they like like like like what like like the like likes.. Every a big of moms and say they like to say like of. Everyone like she like' them like the toys things like the one together. The like felt so happy. She would a big do. because they was very hard, her mom. They were did there. Shemy were very sad and had learned all all all the things they do about. From parents make them on things. make of of of of about them. They all like on of of say, but they were have away. They both had the other friends and friends. because they both all them them and together the them were keep together on the other. The friends were so
+----------------------------------------------------------------------
+[8] Once Once was a family there was very friends. The Everyone loved the cars and had things, and they worked make make of time. From From day got on to the they found the woulds what that they were had to do to would to good better. The Everyone worked together had make manys and.. all they were. They both shared They like like like like like like together. They all From all had
+----------------------------------------------------------------------
+[9] Once upon was a lived friends. lived friends friends friends friends friends friends. Everyone loved together the flowers together together adventures together together together all..
+----------------------------------------------------------------------
+[10] Once upon
+----------------------------------------------------------------------

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local datasets, checkpoints, logs (large / regenerable / live on faster3 scratch)
+tinystories_demo/data/
+tinystories_demo/data_50k/
+tinystories_demo/logs/
+tinystories_demo/output/
+*.arrow
+
+# Misc
+.DS_Store
+wandb/

@@ -2,6 +2,26 @@ import yaml
 import os
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _resolve_path(path: str):
+    """Resolve a config path relative to the repo root or the current working directory."""
+    if not path:
+        return path
+    if os.path.isabs(path):
+        return path
+    candidates = [path]
+    if os.path.exists(path):
+        return os.path.abspath(path)
+    candidates.append(os.path.join(REPO_ROOT, path))
+    candidates.append(os.path.join(REPO_ROOT, "src", path))
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+    return os.path.abspath(path)
+
+
 class SamplingConfig:
     """Sampling configuration for generation."""
     def __init__(self, **kwargs):
@@ -97,6 +117,9 @@ class Config:
     sampling_configs: list = [SamplingConfig()]
     num_samples: int = 100
 
+    # Generation
+    eval_use_ema: bool = True  # Generate from EMA weights; set False for short runs where EMA is undertrained
+
     # PPL Evaluation
     online_eval: bool = True  # Enable PPL evaluation for generated samples
     eval_ppl_model: str = "gpt2-large"  # Model for PPL evaluation
@@ -142,6 +165,7 @@ def load_config_from_yaml(path: str) -> Config:
             setattr(config, key, value)
 
     if config.sampling_configs_path:
+        config.sampling_configs_path = _resolve_path(config.sampling_configs_path)
         config.sampling_configs = load_sampling_configs(config.sampling_configs_path)
 
     return config

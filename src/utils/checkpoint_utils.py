@@ -73,7 +73,7 @@ def save_checkpoint(state: Any, output_dir: str, step: int, hf_repo_id: str = No
     log_for_0(f"Saving checkpoint to {ckpt_dir}")
 
     checkpoints.save_checkpoint_multiprocess(
-        ckpt_dir, state_dict, step, keep=10, overwrite=True,
+        ckpt_dir, state_dict, step, keep=3, overwrite=True,
     )
 
     log_for_0(f"Checkpoint written to {ckpt_dir}")

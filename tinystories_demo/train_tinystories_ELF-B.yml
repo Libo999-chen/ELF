@@ -1,0 +1,29 @@
+# Minimal TinyStories smoke-test config for ELF.
+# Run from the repo root with:
+#   python src/train.py --config tinystories_demo/train_tinystories_ELF-B.yml
+
+data_path: "tinystories_demo/data/train"
+eval_data_path: "tinystories_demo/data/val"
+max_length: 512
+tokenizer_name: "t5-small"
+encoder_model_name: "t5-small"
+encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
+
+model: "ELF-B"
+# NOTE: optax.contrib.muon needs jax>=0.4.27, but this machine's driver (515/CUDA11.7)
+# caps us at jax 0.4.25 (cuda11). Use adamw here; switch back to muon after a driver upgrade.
+optimizer: "adamw"
+global_batch_size: 32
+epochs: 50          # multi-epoch run; adjust as needed (4000 samples / batch 32 = 125 steps/epoch)
+blr: 0.0001
+warmup_steps: 0
+log_freq: 10
+save_freq: 1        # save a checkpoint every epoch (auto-resumable from output_dir)
+eval_freq: 0.5      # <1 -> no in-loop generation/PPL (keeps unattended run robust)
+num_samples: 10
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
+# Checkpoints go to fast NVMe scratch (NOT the 25GB home quota); ~1.6GB each.
+output_dir: "/mnt/faster3/lc2762/elf_tinystories_output"
+use_wandb: false
+pad_token: "eos"
+seed: 42

@@ -222,7 +222,12 @@ def _setup_generation(state, config, batch_size, header):
     encoder_config, _, _ = get_encoder(config.encoder_model_name, None)
     d_model = encoder_config.d_model
 
-    model_params_replicated = jax_utils.replicate(state_unreplicated.ema_params1)
+    # EMA weights (decay 0.9999) need many thousands of steps to be useful; for short
+    # runs the raw trained params generate far better. Controlled by config.eval_use_ema.
+    use_ema = getattr(config, "eval_use_ema", True)
+    chosen_params = state_unreplicated.ema_params1 if use_ema else state_unreplicated.params
+    log_for_0(f"Generation weights: {'EMA' if use_ema else 'raw params'}")
+    model_params_replicated = jax_utils.replicate(chosen_params)
 
     per_device_batch = max(1, batch_size // num_local_devices)
     effective_batch_size = per_device_batch * num_local_devices
