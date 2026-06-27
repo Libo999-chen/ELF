@@ -66,6 +66,23 @@ def lexicon_sentiment(text):
     return p - n  # >0 positive, <0 negative
 
 
+# --- off-target attributes (for the disentanglement / leakage test) ---
+ANIMAL_WORDS = set("cat cats dog dogs bird birds rabbit bunny fox bear duck frog fish mouse mice "
+                   "pig cow horse puppy kitten kitty owl bee butterfly snail turtle squirrel sheep "
+                   "lion tiger monkey elephant chick hen goat deer".split())
+FEMALE_WORDS = set("she her hers girl woman women mom mommy mother sister aunt grandma queen "
+                   "princess lady daughter".split())
+MALE_WORDS = set("he him his boy man men dad daddy father brother uncle grandpa king prince guy son".split())
+
+
+def attr_scores(text):
+    """Off-target attributes of a generation: (has_animal, is_female, length)."""
+    toks = [w.strip(".,!?;:\"'").lower() for w in text.split()]
+    animal = sum(t in ANIMAL_WORDS for t in toks) > 0
+    female = sum(t in FEMALE_WORDS for t in toks) > sum(t in MALE_WORDS for t in toks)
+    return float(animal), float(female), float(len(toks))
+
+
 def _pad_batch(list_of_ids, max_length, pad_id):
     B = len(list_of_ids)
     ids = np.full((B, max_length), pad_id, dtype=np.int32)
@@ -208,22 +225,30 @@ def main():
         gtexts = [tok.decode(pred[m], skip_special_tokens=True) for m in range(M)]
         scores = [lexicon_sentiment(g) for g in gtexts]
         pos_frac = float(np.mean([s > 0 for s in scores]))
-        results.append((a, pos_frac))
+        attrs = np.array([attr_scores(g) for g in gtexts])  # (M, 3): animal, female, len
+        animal_frac, female_frac, mean_len = attrs.mean(0)
+        results.append((a, pos_frac, animal_frac, female_frac, mean_len))
         for g in gtexts:
             rows.append({"alpha": a, "generated": g})
 
-    print("\n" + "=" * 56)
-    print("C2 STEERING (sentiment axis)")
-    print("=" * 56)
-    print("  alpha   positive_fraction")
-    for a, pf in results:
-        print(f"  {a:+5.1f}   {pf:.3f}   {'#' * int(pf * 30)}")
-    fracs = [pf for _, pf in results]
+    print("\n" + "=" * 64)
+    print("C2 STEERING (sentiment axis)  [on-target = positive_frac]")
+    print("=" * 64)
+    print("  alpha  positive  | animal  female  len   (off-target, should stay flat)")
+    for a, pf, af, ff, ml in results:
+        print(f"  {a:+5.1f}  {pf:.3f}     |  {af:.3f}   {ff:.3f}  {ml:5.1f}")
+    fracs = [r[1] for r in results]
     delta = fracs[-1] - fracs[0]
-    # monotonic non-decreasing (allow small dips)
     mono = all(fracs[i + 1] >= fracs[i] - 0.05 for i in range(len(fracs) - 1))
     verdict = (delta >= 0.3) and mono
-    print(f"\n  endpoint delta = {delta:+.3f} | monotonic(+/-0.05) = {mono}")
+    # off-target leakage = range (max-min) of each off-target attribute across the sweep
+    arr = np.array([[r[2], r[3], r[4]] for r in results])
+    leak_animal, leak_female = (arr[:, 0].ptp()), (arr[:, 1].ptp())
+    leak_len = arr[:, 2].ptp()
+    print("\n  --- OFF-TARGET LEAKAGE (range across alpha; lower = better disentanglement) ---")
+    print(f"  animal_frac range = {leak_animal:.3f} | female_frac range = {leak_female:.3f} "
+          f"| length range = {leak_len:.1f}")
+    print(f"\n  on-target endpoint delta = {delta:+.3f} | monotonic(+/-0.05) = {mono}")
     print(f"  VERDICT: {'PASS — interpretable, monotonic control' if verdict else 'FAIL — flat / non-monotonic'}")
     print("=" * 56 + "\n")
 
