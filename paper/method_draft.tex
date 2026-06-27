@@ -1,7 +1,9 @@
 % ---------------------------------------------------------------------------
-% Semantic-Manifold-Conditioned Embedding Flows (SM-ELF)
-% Method draft -- matched to the CURRENT implementation (M1).
-% Sections marked (M1) are implemented; (M2) are planned extensions.
+% Semantic-Manifold Factorization of Embedding Flows (SM-ELF)
+% Method + experiments draft. M1 (mean-pool residual flow) and M2 (low-rank
+% manifold code + cycle + IB) are both implemented and trained; the Experiments
+% section reports the actual TinyStories results, including the key (negative)
+% disentanglement finding and the in-progress code-dimension sweep.
 % Self-contained; compiles with pdflatex.
 % ---------------------------------------------------------------------------
 \documentclass[11pt]{article}
@@ -180,33 +182,79 @@ makes that movement faithful rather than incidental.
 \label{sec:exp}
 % ===========================================================================
 
-We compare three models on TinyStories: \textbf{ELF} (baseline, $p(\xb)$),
-\textbf{Conditional-ELF} (full-rank $\phib$, no bottleneck/cycle), and
-\textbf{SM-ELF} (low-rank code $\cb$, cycle + IB). The first row is the
-single-factor sentiment setting; $\cb=(\text{protagonist},\text{setting},
-\text{sentiment})$ follows.
+We train, with identical hyperparameters (5$\times$RTX-3090, batch 80, 60 epochs),
+two models on a 50k-story TinyStories subset: \textbf{Conditional-ELF} (full-rank
+mean-pool $\phib\in\R^{d}$, $d{=}512$, no bottleneck/cycle; the M1 ablation) and
+\textbf{SM-ELF} (low-rank code $\cb\in\R^{k}$, $k{=}64$, with cycle + IB; M2).
+Sentiment labels come from a dependency-free lexicon; steering axes are fit by
+difference-of-means in the respective code space. Generation reconstructs
+$\hat\xb=\phib+\hat\rb$ before the decoder head.
 
-\begin{center}
+\paragraph{Both models are controllable, and indistinguishably so.}
+The factorization is healthy and used: at a fixed code, resampling noise yields
+semantically consistent yet lexically diverse stories, and the generations'
+re-probed code matches the conditioning code (Table~\ref{tab:c1}). Steering the
+sentiment axis flips the held-out positive-sentiment fraction monotonically from
+$0$ to $1$ for \emph{both} models, with generations remaining coherent at the
+extremes. On these metrics SM-ELF and Conditional-ELF are statistically
+indistinguishable---the low-rank manifold and cycle loss confer no measurable
+advantage for single-factor control.
+
+\begin{table}[h]\centering\small
 \begin{tabular}{lcccc}
-\textbf{Method} & \textbf{Control acc.} & \textbf{Diversity} & \textbf{PPL} & \textbf{Sem.\ drift}\\
+& fidelity & within-$\cb$ sim & across-$\cb$ sim & distinct-2 \\
 \hline
-ELF              & low / none & high   & baseline & high \\
-Conditional-ELF  & medium     & medium & similar  & medium \\
-SM-ELF (ours)    & high       & high   & similar  & low \\
+Conditional-ELF ($d{=}512$) & 0.962 & 0.967 & 0.918 & 0.755 \\
+SM-ELF ($k{=}64$)           & 0.961 & 0.967 & 0.931 & 0.787 \\
 \end{tabular}
-\end{center}
+\caption{C1 (fixed-code resampling). Both pass: code respected, no collapse.}
+\label{tab:c1}
+\end{table}
 
-\noindent\textbf{What we claim.} The win is \emph{not} raw perplexity (if
-$\phib$ is a deterministic summary, $p(\rb\mid\phib)$ and $p(\xb)$ share the same
-entropy), but controllability and causal faithfulness. Falsifiable checks:
-(C0) residual factorization leaves PPL/entropy within noise of ELF;
-(C1) at fixed $\cb$, samples stay semantically close yet lexically diverse,
-while different $\cb$ change semantics---ruling out both collapse modes;
-(C2) sweeping $\cb$ along an interpretable axis shifts a held-out classifier's
-attribute monotonically;
-(C3) ablating $\mathcal{L}_{\mathrm{cyc}}$ degrades control accuracy;
-(C4) a linear probe can no longer read the probed attribute off $\rb$, confirming
-the residual is stripped of that semantics.
+\paragraph{The low-rank code \emph{harms} disentanglement.}
+Because attributes are correlated in the data (positive stories skew female
+protagonist, negative skew male), the difference-of-means sentiment axis is
+contaminated by gender: steering sentiment drags the protagonist's gender
+\emph{entirely} (off-target female fraction swings over the full $[0,1]$ range)
+for both models. The models separate, however, once we project the gender
+direction out of the sentiment axis and steer the orthogonalized axis: the
+\emph{model's own} code geometry then determines how much gender still leaks
+(Table~\ref{tab:leak}). The full-rank conditioning isolates the attributes far
+better (gender leakage $0.33$) than the low-rank code ($0.88$). Compressing the
+conditioning into $k{=}64$ dimensions does not disentangle---it forces correlated
+attributes into \emph{superposition}, reducing their linear separability.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lcc}
+off-target leakage (range over $\alpha$) & raw axis & orthogonalized axis \\
+\hline
+Conditional-ELF ($d{=}512$) & 1.00 & \textbf{0.33} \\
+SM-ELF ($k{=}64$)           & 1.00 & 0.88 \\
+\end{tabular}
+\caption{Gender leakage while steering sentiment (lower = better disentanglement).
+On-target sentiment control is $0\!\to\!1$ in all cases. The low-rank code leaks
+\emph{more} once the axis is decontaminated.}
+\label{tab:leak}
+\end{table}
+
+\paragraph{Mechanism: a code-dimension sweep (in progress).}
+If superposition is the cause, separability should degrade \emph{monotonically}
+as $k$ shrinks. We therefore train the same architecture at $k\in\{16,64,256\}$
+(plus the $d{=}512$ full-rank reference) under matched budgets and measure
+orthogonalized gender leakage. The two available points are consistent with the
+hypothesis ($k{=}64\!\to\!0.88$ vs.\ $d{=}512\!\to\!0.33$); $k{=}16$ and $k{=}256$
+are training. A monotonic $k$-vs-leakage curve would establish that the
+bottleneck dimensionality, not the cycle loss or conditioning per se, governs
+attribute entanglement in the conditioning code.
+
+\paragraph{Takeaway.} Contrary to the intuition that a compact ``semantic
+manifold'' code yields cleaner, more disentangled control, we find the opposite:
+a low-rank conditioning code induces attribute superposition and \emph{worse}
+linear separability than full-rank conditioning, while both achieve equal
+single-factor controllability. This reframes the contribution from a better
+controllable LM toward a study of how the geometry of the conditioning variable
+governs disentanglement---connecting controllable generation directly to the
+superposition phenomenon of \cite{manifold2026}.
 
 % ===========================================================================
 \begin{thebibliography}{9}
