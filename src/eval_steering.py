@@ -101,8 +101,11 @@ def parse_args():
 def main():
     args = parse_args()
     cfg = load_config_from_yaml(args.config)
-    if not (cfg.semantic_factorization and cfg.manifold_dim > 0):
-        sys.exit("eval_steering requires an M2 model (semantic_factorization=true, manifold_dim>0).")
+    if not cfg.semantic_factorization:
+        sys.exit("eval_steering requires an SM-ELF model (semantic_factorization=true).")
+    # M2: code c in R^k lifted by U. M1: the "code" is the d-dim mean-pool phi itself
+    # (manifold_dim=0), so steering happens directly in phi space with an identity lift.
+    is_m2 = cfg.manifold_dim > 0
     alphas = [float(a) for a in args.alphas.split(",")]
     sc = cfg.sampling_configs[0]
     steps = sc.num_sampling_steps[0] if isinstance(sc.num_sampling_steps, list) else sc.num_sampling_steps
@@ -147,8 +150,12 @@ def main():
     params = state.ema_params1 if cfg.eval_use_ema else state.params
     # m0 view: drop the (unused) manifold submodule params to avoid unexpected keys.
     m0_params = {k: v for k, v in params.items() if k != "manifold"}
-    U = np.asarray(params["manifold"]["lift"]["kernel"])  # (k, d)
-    log_for_0(f"Loaded M2 checkpoint; lift U: {U.shape}")
+    if is_m2:
+        U = np.asarray(params["manifold"]["lift"]["kernel"])  # (k, d)
+        log_for_0(f"Loaded SM checkpoint (M2); lift U: {U.shape}")
+    else:
+        U = None  # M1: identity lift (phi is the d-dim code itself)
+        log_for_0("Loaded SM checkpoint (M1, manifold_dim=0); steering in d-dim phi space")
 
     # --- codes + sentiment labels on val stories ---
     val = load_dataset_split(cfg.eval_data_path)
@@ -162,8 +169,12 @@ def main():
     for s in range(0, N, B):
         x0 = _encode(ids[s:s + B], valid[s:s + B], enc_model.apply, enc_params, cfg)
         pooled = compute_phi(x0, valid[s:s + B])[:, 0, :]
-        _, mu, _ = apply_manifold_code(params["manifold"], pooled, cfg.manifold_dim, d)
-        mus.append(np.asarray(mu))
+        if is_m2:
+            _, mu_b, _ = apply_manifold_code(params["manifold"], pooled, cfg.manifold_dim, d)
+            mus.append(np.asarray(mu_b))
+        else:
+            mus.append(np.asarray(pooled))  # M1: code = d-dim mean-pool phi
+
     mu = np.concatenate(mus, axis=0)  # (N, k)
     labels = np.array([lexicon_sentiment(t) for t in texts])
     pos, neg = mu[labels > 0], mu[labels < 0]
@@ -179,7 +190,8 @@ def main():
     rows, results = [], []
     for a in alphas:
         c = (c0 + a * u).astype(np.float32)
-        phi_lift = jnp.asarray(np.repeat((c @ U)[None, :], M, axis=0))  # (M, d)
+        phi_vec = (c @ U) if is_m2 else c   # M2 lifts via U; M1 phi == code (d-dim)
+        phi_lift = jnp.asarray(np.repeat(phi_vec[None, :], M, axis=0))  # (M, d)
         rng, nrng, trng = jax.random.split(rng, 3)
         z = jax.random.normal(nrng, (M, L, d)) * cfg.denoiser_noise_scale
         t_steps = get_sampling_steps(trng, n_steps=steps, time_schedule=sc.time_schedule,
