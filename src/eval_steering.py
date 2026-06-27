@@ -46,7 +46,7 @@ from utils.encoder_utils import encode_text
 from utils.semantic_utils import compute_phi
 from utils.sampling_utils import get_sampling_steps
 from utils.generation_utils import _generate_samples_single_batch, _dlm_decode_batch, mask_after_eos
-from configs.config import load_config_from_yaml
+from configs.config import load_config_from_yaml, apply_config_overrides
 
 
 POS_WORDS = set("happy happily smiled smile smiles laugh laughed laughing fun joy joyful "
@@ -122,12 +122,16 @@ def parse_args():
                    help="Remove the gender direction from the sentiment axis (disentanglement test).")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=str, default=None)
+    p.add_argument("--config_override", action="append", default=[],
+                   help="Override config values (field=value), e.g. manifold_dim=16.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     cfg = load_config_from_yaml(args.config)
+    if args.config_override:
+        cfg = apply_config_overrides(cfg, args.config_override)
     if not cfg.semantic_factorization:
         sys.exit("eval_steering requires an SM-ELF model (semantic_factorization=true).")
     # M2: code c in R^k lifted by U. M1: the "code" is the d-dim mean-pool phi itself
