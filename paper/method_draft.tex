@@ -128,27 +128,31 @@ sentences; fixing $\phib$ and resampling $\eps$ probes whether the code carries
 semantics (\S\ref{sec:exp}).
 
 % ===========================================================================
-\subsection{Planned: low-rank manifold, cycle loss, information bottleneck}
+\subsection{Low-rank manifold, cycle loss, information bottleneck}
 \label{sec:m2}
 % ===========================================================================
 
-M2 replaces the mean \eqref{eq:phi} with a low-rank \emph{manifold} code \plan
+M2 replaces the mean \eqref{eq:phi} with a low-rank \emph{manifold} code \impl
+produced by a small encoder $g_\theta$ and lifted by $U$,
 \begin{equation}
   \cb = g_\theta\big(\mathrm{pool}(\xb)\big)\in\R^{k},\;\; k\ll d,
   \qquad \phib(s)=U\cb,
 \end{equation}
 whose $k$-dimensional bottleneck forces $\phib$ to encode only reusable global
-structure. A semantic-consistency (cycle) loss \plan re-probes the
-reconstruction and matches its coordinates to the conditioning code,
+structure. The residual target uses a stop-gradient lift,
+$\rb = \xb - \mathrm{sg}[U\cb]$, so $g_\theta,U$ are trained through the
+conditioning, cycle, and IB paths rather than by making their own regression
+target easier. A semantic-consistency (cycle) loss \impl re-probes the
+reconstruction and matches its code to the conditioning code,
 \begin{equation}
   \hat\cb = g_\theta\big(\mathrm{pool}(\hat\xb)\big),
   \qquad
-  \mathcal{L}_{\mathrm{cyc}} = \E\big[\|\hat\cb-\cb\|^2\big],
+  \mathcal{L}_{\mathrm{cyc}} = \E\big[\|\hat\cb-\mathrm{sg}[\cb]\|^2\big],
   \label{eq:cyc}
 \end{equation}
 turning steering into a trained property: a generation conditioned on a perturbed
-code $\cb+\delta$ is optimized to realize it, so moving along a manifold axis is
-causally faithful by construction. An information bottleneck \plan
+code $\cb+\alpha\bm u$ is optimized to realize it, so moving along a manifold axis
+is causally faithful by construction. An information bottleneck \impl
 $\mathcal{L}_{\mathrm{ib}}=\beta\,\mathrm{KL}\!\big(q(\cb\mid s)\,\|\,
 \mathcal{N}(0,I)\big)$ guards against collapse (the flow ignoring $\phib$, or
 $\phib$ memorizing $\xb$). Full objective:
@@ -157,8 +161,19 @@ $\phib$ memorizing $\xb$). Full objective:
   + \lambda_{\mathrm{cyc}}\mathcal{L}_{\mathrm{cyc}}
   + \mathcal{L}_{\mathrm{ib}}.
 \end{equation}
-For unconditional sampling, a small prior $p_\psi(\cb)$ over the $k$-dimensional
-code is trained post-hoc and sampled before the residual flow.
+\emph{Implementation note.} The current scaffold uses a deterministic code
+$\cb=\bm\mu$ in the forward pass (the IB KL still regularizes
+$\bm\mu,\log\bm\sigma^2$); a sampled code $\cb=\bm\mu+\bm\sigma\odot\bm\epsilon$
+is a one-line upgrade. For unconditional sampling, a small prior $p_\psi(\cb)$
+over the $k$-dimensional code is trained post-hoc and sampled before the residual
+flow.
+
+\paragraph{Steering (C2).} Given a labeled attribute, we fit an axis $\bm u$ in
+code space (difference-of-means or a linear probe), then generate from
+$\cb_0+\alpha\bm u$ across a sweep of $\alpha$, lifting $\phib=U(\cb_0+\alpha\bm u)$
+and running the residual flow. Monotonic movement of a held-out classifier's
+attribute vs.\ $\alpha$ is the controllability result; the cycle loss is what
+makes that movement faithful rather than incidental.
 
 % ===========================================================================
 \section{Experiments}
