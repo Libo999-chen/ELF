@@ -60,19 +60,20 @@ def shift_left(x, shift_per_sample, pad_value=0, axis=1):
 
 def _sample_step_for_scan(
     model_apply_fn, model_params, config, sampling_config: SamplingConfig,
-    cfg_scale, self_cond_cfg_scale, cond_seq, cond_seq_mask, rng=None,
+    cfg_scale, self_cond_cfg_scale, cond_seq, cond_seq_mask, rng=None, phi=None,
 ):
     """Create a scan-compatible step function.
 
     For method == "sde", `rng` must be provided and the scan carry must include a step index
     (z, x_pred, step_idx); fold_in is done per step. Other methods use a (z, x_pred) carry.
+    `phi`: optional (B, C) semantic code threaded into every model call.
     """
     method = sampling_config.sampling_method
     base_kwargs = dict(
         model_apply_fn=model_apply_fn, model_params=model_params,
         config=config,
         cfg_scale=cfg_scale, self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask,
+        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask, phi=phi,
     )
 
     if method == "sde":
@@ -108,9 +109,13 @@ def _sample_step_for_scan(
 def _generate_samples_single_batch(
     model_params, model_apply_fn, rng: PRNGKey, z: Array, t_steps: Array,
     cond_seq: Array, cond_seq_mask: Array, config: Config, sampling_config: SamplingConfig,
-    cfg_scale: float, self_cond_cfg_scale: float,
+    cfg_scale: float, self_cond_cfg_scale: float, phi: Array = None,
 ) -> Array:
-    """Generate samples for a single batch (pmap-compatible, uses lax.scan)."""
+    """Generate samples for a single batch (pmap-compatible, uses lax.scan).
+
+    When `phi` is given (SM-ELF), the returned latent is the residual r-hat; the
+    caller adds phi back before decoding (see `_dlm_decode_batch`).
+    """
     method = sampling_config.sampling_method
     batch_size, max_length, d_model = z.shape
     if cond_seq is None:
@@ -120,7 +125,7 @@ def _generate_samples_single_batch(
         model_apply_fn=model_apply_fn, model_params=model_params,
         config=config,
         cfg_scale=cfg_scale, self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask,
+        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask, phi=phi,
     )
 
     z = restore_cond(z, cond_seq, cond_seq_mask)
@@ -141,9 +146,16 @@ def _generate_samples_single_batch(
     return z
 
 
-def _dlm_decode_batch(z, model_params, model_apply_fn, t_final_val, config, self_cond_cfg_scale):
-    """Decode z→tokens with the DLM decoder head."""
+def _dlm_decode_batch(z, model_params, model_apply_fn, t_final_val, config, self_cond_cfg_scale, phi=None):
+    """Decode z→tokens with the DLM decoder head.
+
+    For SM-ELF, `z` is the residual r-hat and `phi` is the semantic code; the full
+    embedding x-hat = phi + r-hat is reconstructed before the decoder head, which
+    (as in training) operates on the full embedding.
+    """
     batch_size = z.shape[0]
+    if phi is not None:
+        z = z + phi[:, None, :]
     t_final = jnp.full((batch_size,), t_final_val, dtype=z.dtype)
     self_cond_cfg_scale_batch = (
         jnp.full((batch_size,), self_cond_cfg_scale, dtype=z.dtype)
@@ -155,6 +167,7 @@ def _dlm_decode_batch(z, model_params, model_apply_fn, t_final_val, config, self
         deterministic=True,
         self_cond_cfg_scale=self_cond_cfg_scale_batch,
         decoder_step_active=jnp.array(True),
+        phi=phi,
     )
     return jnp.argmax(decoder_logits, axis=-1)
 

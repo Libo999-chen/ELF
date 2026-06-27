@@ -124,9 +124,9 @@ def net_out_to_v_x(net_out, z, t, t_eps=5e-2):
 @partial(jax.jit, static_argnums=(0, 5, 6))
 def _forward_sample_self_cond(
     model_apply_fn, model_params, z, t_batch, x_pred_prev, config,
-    self_cond_cfg_scale, cond_seq, cond_seq_mask,
+    self_cond_cfg_scale, cond_seq, cond_seq_mask, phi=None,
 ):
-    """Forward pass with self-conditioning."""
+    """Forward pass with self-conditioning. `phi`: optional (B, C) semantic code."""
     t_eps = config.t_eps
     self_cond_prob = config.self_cond_prob
     _restore_vx = partial(restore_vx, cond_seq=cond_seq, cond_seq_mask=cond_seq_mask)
@@ -138,7 +138,7 @@ def _forward_sample_self_cond(
         self_cond_scale_batch = jnp.full((z.shape[0],), self_cond_cfg_scale)
         net_out_cond = model_apply_fn(
             {"params": model_params}, z_input_cond, t_batch, deterministic=True,
-            self_cond_cfg_scale=self_cond_scale_batch,
+            self_cond_cfg_scale=self_cond_scale_batch, phi=phi,
         )
         v_cond, x_cond = net_out_to_v_x(net_out_cond, z, t_batch, t_eps)
         return _restore_vx(v_cond, x_cond)
@@ -146,7 +146,7 @@ def _forward_sample_self_cond(
     # No self-conditioning
     if self_cond_prob == 0:
         net_out = model_apply_fn(
-            {"params": model_params}, z, t_batch, deterministic=True,
+            {"params": model_params}, z, t_batch, deterministic=True, phi=phi,
         )
         v, x = net_out_to_v_x(net_out, z, t_batch, t_eps)
         return _restore_vx(v, x)
@@ -156,7 +156,7 @@ def _forward_sample_self_cond(
         z_uncond = restore_cond(jnp.zeros_like(z), cond_seq, cond_seq_mask)
         z_input_uncond = jnp.concatenate([z, z_uncond], axis=-1)
         net_out_uncond = model_apply_fn(
-            {"params": model_params}, z_input_uncond, t_batch, deterministic=True,
+            {"params": model_params}, z_input_uncond, t_batch, deterministic=True, phi=phi,
         )
         v_uncond, x_uncond = net_out_to_v_x(net_out_uncond, z, t_batch, t_eps)
         v_uncond, x_uncond = _restore_vx(v_uncond, x_uncond)
@@ -165,7 +165,7 @@ def _forward_sample_self_cond(
 
     z_input_cond = jnp.concatenate([z, x_pred_prev], axis=-1)
     net_out_cond = model_apply_fn(
-        {"params": model_params}, z_input_cond, t_batch, deterministic=True,
+        {"params": model_params}, z_input_cond, t_batch, deterministic=True, phi=phi,
     )
     v_cond, x_cond = net_out_to_v_x(net_out_cond, z, t_batch, t_eps)
     v_cond, x_cond = _restore_vx(v_cond, x_cond)
@@ -180,13 +180,17 @@ def _forward_sample_self_cond(
 @partial(jax.jit, static_argnums=(0, 5, 6, 7))
 def _forward_sample(
     model_apply_fn, model_params, z, t_batch, x_pred_prev, config,
-    cfg_scale, self_cond_cfg_scale, cond_seq, cond_seq_mask,
+    cfg_scale, self_cond_cfg_scale, cond_seq, cond_seq_mask, phi=None,
 ):
-    """Forward pass with optional self-conditioning and CFG."""
+    """Forward pass with optional self-conditioning and CFG. `phi`: semantic code.
+
+    Note: CFG here guides on the in-sequence text condition (cond_seq); the
+    semantic code phi is kept on in both branches (it is the thing we condition on).
+    """
     v_cond, x_cond = _forward_sample_self_cond(
         model_apply_fn, model_params, z, t_batch, x_pred_prev, config,
         self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask,
+        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask, phi=phi,
     )
     if cfg_scale == 1.0:
         return v_cond, x_cond
@@ -200,7 +204,7 @@ def _forward_sample(
     v_uncond, x_uncond = _forward_sample_self_cond(
         model_apply_fn, model_params, z_uncond, t_batch, x_pred_prev_uncond, config,
         self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=jnp.zeros_like(cond_seq), cond_seq_mask=cond_seq_mask,
+        cond_seq=jnp.zeros_like(cond_seq), cond_seq_mask=cond_seq_mask, phi=phi,
     )
 
     v_out = v_uncond + cfg_scale * (v_cond - v_uncond)
@@ -212,16 +216,16 @@ def _forward_sample(
 def _ode_step(
     model_apply_fn, model_params, z, t, t_next, x_pred_prev,
     config, cfg_scale, self_cond_cfg_scale,
-    cond_seq, cond_seq_mask,
+    cond_seq, cond_seq_mask, phi=None,
 ):
-    """Single ODE (Euler) step for sampling."""
+    """Single ODE (Euler) step for sampling. `phi`: optional semantic code."""
     t_batch = jnp.full((z.shape[0],), t)
     v_pred, x_pred = _forward_sample(
         model_apply_fn=model_apply_fn, model_params=model_params,
         z=z, t_batch=t_batch, x_pred_prev=x_pred_prev,
         config=config,
         cfg_scale=cfg_scale, self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask,
+        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask, phi=phi,
     )
     return z + (t_next - t) * v_pred, x_pred
 
@@ -230,7 +234,7 @@ def _ode_step(
 def _sde_step(
     model_apply_fn, model_params, z, t, t_next, x_pred_prev,
     config, cfg_scale, self_cond_cfg_scale,
-    cond_seq, cond_seq_mask, gamma, rng,
+    cond_seq, cond_seq_mask, gamma, rng, phi=None,
 ):
     """Per-step SDE-style sampler with hybrid (t-and-step) noise scaling.
 
@@ -249,6 +253,6 @@ def _sde_step(
         z=z_back, t_batch=t_batch, x_pred_prev=x_pred_prev,
         config=config,
         cfg_scale=cfg_scale, self_cond_cfg_scale=self_cond_cfg_scale,
-        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask,
+        cond_seq=cond_seq, cond_seq_mask=cond_seq_mask, phi=phi,
     )
     return z_back + (t_next - t_back) * v_pred, x_pred

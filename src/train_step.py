@@ -7,6 +7,7 @@ import jax.numpy as jnp
 
 from utils.train_utils import TrainState
 from utils.encoder_utils import encode_text
+from utils.semantic_utils import compute_phi
 from utils.sampling_utils import (
     sample_cfg_scale, add_noise, sample_timesteps,
     net_out_to_v_x, restore_cond,
@@ -78,12 +79,25 @@ def train_step(
         loss_mask = jnp.ones_like(attention_mask)
     loss_mask = loss_mask * (1 - batch["cond_seq_mask"])
 
-    denoiser_z = add_noise(x0, noise, t, config, cond_seq_mask=cond_seq_mask)
+    # Semantic-manifold factorization: phi(s) is the masked mean of x0 over loss
+    # positions; the flow then denoises the residual r0 = x0 - phi rather than x0.
+    # The decoder (CE) branch still operates on the full x0.
+    if config.semantic_factorization:
+        phi = compute_phi(x0, loss_mask)   # (B, 1, C)
+        phi_vec = phi[:, 0, :]             # (B, C) for the conditioning prefix
+        flow_target = x0 - phi             # residual r0, broadcast over S
+    else:
+        phi_vec = None
+        flow_target = x0
+
+    denoiser_z = add_noise(flow_target, noise, t, config, cond_seq_mask=cond_seq_mask)
 
     drop = batch["label_drop_mask"][:, None]
     if config.label_drop_prob > 0:
-        denoiser_z = jnp.where(drop[:, :, None] & (cond_seq_mask > 0), jnp.zeros_like(denoiser_z), denoiser_z)
-        x0 = jnp.where(drop[:, :, None] & (cond_seq_mask > 0), jnp.zeros_like(x0), x0)
+        zero_cond = drop[:, :, None] & (cond_seq_mask > 0)
+        denoiser_z = jnp.where(zero_cond, jnp.zeros_like(denoiser_z), denoiser_z)
+        x0 = jnp.where(zero_cond, jnp.zeros_like(x0), x0)
+        flow_target = jnp.where(zero_cond, jnp.zeros_like(flow_target), flow_target)
 
     decoder_targets = batch["input_ids"]  # (B, S)
     decoder_step_active = jax.random.bernoulli(decoder_step_rng, decoder_prob)
@@ -99,7 +113,7 @@ def train_step(
     decoder_z = decoder_lambda_t * x0 + (1 - decoder_lambda_t) * decoder_noise
 
     t_expanded = t.reshape(-1, 1, 1)
-    v_target = (x0 - denoiser_z) / jnp.maximum(1 - t_expanded, t_eps)
+    v_target = (flow_target - denoiser_z) / jnp.maximum(1 - t_expanded, t_eps)
 
     if self_cond_prob > 0:
         use_self_cond_mask = (
@@ -127,6 +141,7 @@ def train_step(
             {"params": params}, z_with_zeros, t_input,
             deterministic=True,
             self_cond_cfg_scale=self_cond_cfg_input,
+            phi=phi_vec,
         )
         net_out_init = jax.lax.stop_gradient(net_out_init)
         _, x_pred_init = net_out_to_v_x(net_out_init, z, t_input, t_eps)
@@ -146,18 +161,18 @@ def train_step(
             "deterministic": True,
         }
         if config.self_cond_prob == 0:
-            net_out_uncod = state.apply_fn({"params": params}, z, t, **kwargs)
+            net_out_uncod = state.apply_fn({"params": params}, z, t, phi=phi_vec, **kwargs)
             v_uncond, _ = net_out_to_v_x(net_out_uncod, z, t, t_eps)
             return v_uncond, v_uncond
 
         z_uncond = restore_cond(jnp.zeros_like(z), x_tokens, cond_mask)
         z_input_uncond = jnp.concatenate([z, z_uncond], axis=-1)
-        net_out_uncond = state.apply_fn({"params": params}, z_input_uncond, t, **kwargs)
+        net_out_uncond = state.apply_fn({"params": params}, z_input_uncond, t, phi=phi_vec, **kwargs)
         v_uncond, x_uncond = net_out_to_v_x(net_out_uncond, z, t, t_eps)
         x_uncond = restore_cond(x_uncond, x_tokens, cond_mask)
 
         z_input_cond = jnp.concatenate([z, x_uncond], axis=-1)
-        net_out_cond = state.apply_fn({"params": params}, z_input_cond, t, **kwargs)
+        net_out_cond = state.apply_fn({"params": params}, z_input_cond, t, phi=phi_vec, **kwargs)
         v_cond, _ = net_out_to_v_x(net_out_cond, z, t, t_eps)
         return v_cond, v_uncond
 
@@ -192,6 +207,7 @@ def train_step(
                 rngs={"dropout": model_dropout_rng},
                 self_cond_cfg_scale=self_cond_cfg_scale,
                 decoder_step_active=jnp.array(True),
+                phi=phi_vec,
             )
             log_probs = jax.nn.log_softmax(decoder_logits.astype(jnp.float32), axis=-1)
             ce = -jnp.take_along_axis(log_probs, decoder_targets[..., None], axis=-1).squeeze(-1)
@@ -204,7 +220,7 @@ def train_step(
             denoiser_input = get_z_input(
                 params, denoiser_z, denoiser_t,
                 self_cond_cfg_input=self_cond_cfg_scale,
-                x_tokens=x0,
+                x_tokens=flow_target,
             )
             net_out, _ = state.apply_fn(
                 {"params": params}, denoiser_input, denoiser_t,
@@ -212,10 +228,11 @@ def train_step(
                 rngs={"dropout": model_dropout_rng},
                 self_cond_cfg_scale=self_cond_cfg_scale,
                 decoder_step_active=jnp.array(False),
+                phi=phi_vec,
             )
             v_pred, _ = net_out_to_v_x(net_out, denoiser_z, denoiser_t, t_eps)
             v_final_target = get_v_target(
-                params, denoiser_z, denoiser_t, base_v_target=v_target, x_tokens=x0,
+                params, denoiser_z, denoiser_t, base_v_target=v_target, x_tokens=flow_target,
             )
             per_dim_loss = (v_pred - v_final_target) ** 2
             l2_loss = reduce_token_loss(jnp.mean(per_dim_loss, axis=-1), loss_mask)

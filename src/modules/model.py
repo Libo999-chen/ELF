@@ -50,9 +50,10 @@ class ELF(nn.Module):
     num_time_tokens: int = 4  # Number of in-context time conditioning tokens
     num_self_cond_cfg_tokens: int = 4  # Number of in-context self-cond CFG tokens
     num_model_mode_tokens: int = 0  # If > 0, prepend learnable model-mode tokens that signal decoding mode
+    num_phi_tokens: int = 0  # If > 0, prepend in-context tokens carrying the semantic code phi(s)
     vocab_size: int = 0  # Vocabulary size for decoder unembedding
 
-    def build_context(self, t, self_cond_cfg_scale=None):
+    def build_context(self, t, self_cond_cfg_scale=None, phi=None):
         prefix_tokens = []
         B = t.shape[0]
 
@@ -70,14 +71,25 @@ class ELF(nn.Module):
             if self.num_self_cond_cfg_tokens > 0:
                 prefix_tokens.append(_make_prefix(sc_emb, self.num_self_cond_cfg_tokens, 'self_cond_cfg_tokens'))
 
+        # Semantic code phi(s): (B, text_encoder_dim) projected to hidden_size and
+        # broadcast across num_phi_tokens learnable conditioning slots. Dropping phi
+        # (passing zeros) yields the unconditional branch for CFG.
+        if phi is not None and self.num_phi_tokens > 0:
+            phi_emb = nn.Dense(
+                self.hidden_size, use_bias=True,
+                kernel_init=DEFAULT_KERNEL_INIT, bias_init=DEFAULT_BIAS_INIT, name='phi_proj',
+            )(phi)
+            prefix_tokens.append(_make_prefix(phi_emb, self.num_phi_tokens, 'phi_tokens'))
+
         return prefix_tokens
 
     @nn.compact
     def __call__(
         self, x, t, attention_mask=None, deterministic=True,
-        self_cond_cfg_scale=None, decoder_step_active=None,
+        self_cond_cfg_scale=None, decoder_step_active=None, phi=None,
     ):
-        """x: (N, S, C) or (N, S, 2C) with self-cond. t: (N,). attention_mask: (N, S), 1=valid."""
+        """x: (N, S, C) or (N, S, 2C) with self-cond. t: (N,). attention_mask: (N, S), 1=valid.
+        phi: optional (N, text_encoder_dim) semantic code injected as a conditioning prefix."""
         patch_size = 1
         head_dim = self.hidden_size // self.num_heads
         B = x.shape[0]
@@ -111,7 +123,7 @@ class ELF(nn.Module):
                 attention_mask = jnp.concatenate([mode_mask, attention_mask], axis=1)
 
         prefix_len = 0
-        context_prefix_tokens = self.build_context(t, self_cond_cfg_scale)
+        context_prefix_tokens = self.build_context(t, self_cond_cfg_scale, phi=phi)
         if context_prefix_tokens:
             prefix_tokens = jnp.concatenate(context_prefix_tokens, axis=1)
             prefix_len = prefix_tokens.shape[1]

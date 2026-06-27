@@ -1,0 +1,204 @@
+% ---------------------------------------------------------------------------
+% Semantic-Manifold-Conditioned Embedding Flows (SM-ELF)
+% Method draft -- matched to the CURRENT implementation (M1).
+% Sections marked (M1) are implemented; (M2) are planned extensions.
+% Self-contained; compiles with pdflatex.
+% ---------------------------------------------------------------------------
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{xcolor}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\xb}{\bm{x}}
+\newcommand{\rb}{\bm{r}}
+\newcommand{\zb}{\bm{z}}
+\newcommand{\eps}{\bm{\epsilon}}
+\newcommand{\phib}{\bm{\phi}}
+\newcommand{\cb}{\bm{c}}
+\newcommand{\manifold}{\mathcal{M}}
+\newcommand{\impl}{{\footnotesize\textcolor{teal}{(M1, implemented)}}}
+\newcommand{\plan}{{\footnotesize\textcolor{purple}{(M2, planned)}}}
+
+\title{\vspace{-3em}Semantic-Manifold Factorization of Embedding Flows}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-3em}
+
+% ===========================================================================
+\section{Motivation}
+% ===========================================================================
+
+ELF~\cite{elf2026} models text as a continuous flow in the token-embedding space
+of a frozen encoder $E$: a full-attention Transformer denoises an entire
+embedding sequence $\xb \in \R^{L\times d}$ from Gaussian noise to clean
+embeddings, discretizing to tokens only at $t{=}1$ via a shared decoder head.
+Global sentence structure is \emph{already} present in ELF---every position
+attends to every other at every step---but only \emph{implicitly}, distributed
+across attention and never exposed as a manipulable object.
+
+We factor that structure out into an explicit, sentence-level semantic code
+$\phib(s)$, and let the flow model only the \emph{residual} $\rb=\xb-\phib(s)$
+conditioned on $\phib(s)$. The contribution is not ``global vs.\ per-token''
+denoising (ELF is already global), but an \emph{explicit, conditioning} semantic
+variable, which buys controllable, steerable generation that the implicit model
+cannot offer.
+
+% ===========================================================================
+\section{Method}
+% ===========================================================================
+
+\subsection{Semantic / residual factorization \impl}
+
+Let $\xb = E(s) \in \R^{L\times d}$ be the frozen, normalized encoder embeddings
+of a sentence $s$, and let $\bm{m}\in\{0,1\}^{L}$ mask the valid
+(non-padding, non-conditioning) positions. In the current model the semantic
+code is the masked mean of the clean latent,
+\begin{equation}
+  \phib(s) \;=\; \frac{\sum_{i} m_i\,\xb_i}{\sum_i m_i}\;\in\;\R^{d},
+  \label{eq:phi}
+\end{equation}
+and the embeddings are split additively (with $\phib(s)$ broadcast over $L$),
+\begin{equation}
+  \xb \;=\; \phib(s) + \rb,
+  \qquad
+  \rb \;=\; \xb - \phib(s).
+\end{equation}
+Unlike ELF, which models $p(\xb)$, we model the conditional residual
+$p(\rb \mid \phib(s))$.
+
+\paragraph{Honest reading.} In M1, $\phib(s)$ is the full-dimensional mean, a
+deterministic summary of $\xb$; the residual $\rb$ therefore still carries most
+lexical and positional information. M1 only establishes the residual-flow
+machinery and a no-harm baseline. The semantic-control properties require the
+low-rank bottleneck of \S\ref{sec:m2}.
+
+\subsection{Conditional flow on the residual \impl}
+
+We keep ELF's flow-matching convention, interpolating with a fixed noise scale
+$\sigma$ (\texttt{denoiser\_noise\_scale}),
+\begin{equation}
+  \zb_t \;=\; t\,\rb + (1-t)\,\sigma\,\eps,
+  \qquad \eps\sim\mathcal{N}(0,I),
+\end{equation}
+but flow the \emph{residual} rather than the raw embedding. The network is an
+$\xb$-predictor in residual space: it outputs $\hat\rb$, from which the velocity
+is $\hat{\bm{v}} = (\hat\rb-\zb_t)/(1-t)$. The semantic code is injected as
+$P$ learnable conditioning prefix tokens $\,(\texttt{num\_phi\_tokens})$,
+$\phib(s)$ projected $d\!\to\!d_{\text{hid}}$ and added to each slot---mirroring
+ELF's time tokens. Setting $\phib\!=\!\bm 0$ yields the unconditional branch for
+classifier-free guidance. The denoiser loss is velocity regression on the
+residual,
+\begin{equation}
+  \mathcal{L}_{\mathrm{fm}}
+  = \E_{s,t,\eps}\!\left[\, \bm{m}\odot
+      \big\| \bm{v}_\theta(\zb_t,\phib(s),t) - (\rb - \zb_t)/(1-t) \big\|^2
+    \right].
+  \label{eq:fm}
+\end{equation}
+
+\paragraph{Decoder branch.} ELF's shared decoder head maps a latent to token
+logits at $t{=}1$. Because tokenization needs the \emph{full} embedding, this
+branch operates on $\xb$ (not $\rb$), conditioned on the same $\phib(s)$, and is
+trained with the existing cross-entropy objective $\mathcal{L}_{\mathrm{ce}}$.
+The M1 objective is thus ELF's two-branch loss with the denoiser branch moved to
+residual space:
+\begin{equation}
+  \mathcal{L}_{\text{M1}}
+  = (1-p_{\text{dec}})\,\mathcal{L}_{\mathrm{fm}}
+  + p_{\text{dec}}\,\mathcal{L}_{\mathrm{ce}}.
+\end{equation}
+
+\subsection{Sampling \impl}
+
+Generation runs the residual flow from noise to $\hat\rb$ (ODE/SDE samplers,
+optional self-conditioning and CFG), conditioned on a supplied code
+$\phib$. The clean embedding is reconstructed before discretization,
+\begin{equation}
+  \hat\xb \;=\; \phib + \hat\rb,
+\end{equation}
+and $\hat\xb$ is fed to the decoder head at $t{=}1$ to emit tokens. At test time
+$\phib$ is drawn from a bank of codes \eqref{eq:phi} computed on held-out
+sentences; fixing $\phib$ and resampling $\eps$ probes whether the code carries
+semantics (\S\ref{sec:exp}).
+
+% ===========================================================================
+\subsection{Planned: low-rank manifold, cycle loss, information bottleneck}
+\label{sec:m2}
+% ===========================================================================
+
+M2 replaces the mean \eqref{eq:phi} with a low-rank \emph{manifold} code \plan
+\begin{equation}
+  \cb = g_\theta\big(\mathrm{pool}(\xb)\big)\in\R^{k},\;\; k\ll d,
+  \qquad \phib(s)=U\cb,
+\end{equation}
+whose $k$-dimensional bottleneck forces $\phib$ to encode only reusable global
+structure. A semantic-consistency (cycle) loss \plan re-probes the
+reconstruction and matches its coordinates to the conditioning code,
+\begin{equation}
+  \hat\cb = g_\theta\big(\mathrm{pool}(\hat\xb)\big),
+  \qquad
+  \mathcal{L}_{\mathrm{cyc}} = \E\big[\|\hat\cb-\cb\|^2\big],
+  \label{eq:cyc}
+\end{equation}
+turning steering into a trained property: a generation conditioned on a perturbed
+code $\cb+\delta$ is optimized to realize it, so moving along a manifold axis is
+causally faithful by construction. An information bottleneck \plan
+$\mathcal{L}_{\mathrm{ib}}=\beta\,\mathrm{KL}\!\big(q(\cb\mid s)\,\|\,
+\mathcal{N}(0,I)\big)$ guards against collapse (the flow ignoring $\phib$, or
+$\phib$ memorizing $\xb$). Full objective:
+\begin{equation}
+  \mathcal{L} = \mathcal{L}_{\text{M1}}
+  + \lambda_{\mathrm{cyc}}\mathcal{L}_{\mathrm{cyc}}
+  + \mathcal{L}_{\mathrm{ib}}.
+\end{equation}
+For unconditional sampling, a small prior $p_\psi(\cb)$ over the $k$-dimensional
+code is trained post-hoc and sampled before the residual flow.
+
+% ===========================================================================
+\section{Experiments}
+\label{sec:exp}
+% ===========================================================================
+
+We compare three models on TinyStories: \textbf{ELF} (baseline, $p(\xb)$),
+\textbf{Conditional-ELF} (full-rank $\phib$, no bottleneck/cycle), and
+\textbf{SM-ELF} (low-rank code $\cb$, cycle + IB). The first row is the
+single-factor sentiment setting; $\cb=(\text{protagonist},\text{setting},
+\text{sentiment})$ follows.
+
+\begin{center}
+\begin{tabular}{lcccc}
+\textbf{Method} & \textbf{Control acc.} & \textbf{Diversity} & \textbf{PPL} & \textbf{Sem.\ drift}\\
+\hline
+ELF              & low / none & high   & baseline & high \\
+Conditional-ELF  & medium     & medium & similar  & medium \\
+SM-ELF (ours)    & high       & high   & similar  & low \\
+\end{tabular}
+\end{center}
+
+\noindent\textbf{What we claim.} The win is \emph{not} raw perplexity (if
+$\phib$ is a deterministic summary, $p(\rb\mid\phib)$ and $p(\xb)$ share the same
+entropy), but controllability and causal faithfulness. Falsifiable checks:
+(C0) residual factorization leaves PPL/entropy within noise of ELF;
+(C1) at fixed $\cb$, samples stay semantically close yet lexically diverse,
+while different $\cb$ change semantics---ruling out both collapse modes;
+(C2) sweeping $\cb$ along an interpretable axis shifts a held-out classifier's
+attribute monotonically;
+(C3) ablating $\mathcal{L}_{\mathrm{cyc}}$ degrades control accuracy;
+(C4) a linear probe can no longer read the probed attribute off $\rb$, confirming
+the residual is stripped of that semantics.
+
+% ===========================================================================
+\begin{thebibliography}{9}
+\bibitem{elf2026} K.~Hu et al. \emph{ELF: Embedded Language Flows.}
+  arXiv:2605.10938, 2026.
+\bibitem{manifold2026} \emph{Probing for Representation Manifolds in
+  Superposition.} arXiv:2605.18537, 2026.
+\end{thebibliography}
+
+\end{document}

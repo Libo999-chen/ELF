@@ -1,0 +1,68 @@
+# SM-ELF (semantic-manifold factorization) on TinyStories — M1: mean-pool phi,
+# residual flow x = phi(s) + r. Mirrors train_tinystories_ELF-B_v2.yml; only the
+# SM-specific knobs and the output_dir differ, so it is a clean A/B vs the v2 baseline.
+
+data_path: "tinystories_demo/data_50k/train"
+eval_data_path: "tinystories_demo/data_50k/val"
+max_length: 256
+pad_token: eos
+tokenizer_name: "t5-small"
+encoder_model_name: "t5-small"
+encoder_checkpoint: "embedded-language-flows/t5_small_encoder_jax/t5_small_encoder_jax.pkl"
+
+# --- latent normalization ---
+latent_mean: 0.0
+latent_std: 0.2
+
+# --- architecture ---
+model: "ELF-B"
+bottleneck_dim: 128
+num_time_tokens: 4
+num_self_cond_cfg_tokens: 4
+num_model_mode_tokens: 4
+
+# --- SM-ELF: semantic-manifold factorization (M1) ---
+semantic_factorization: true
+num_phi_tokens: 4        # in-context tokens carrying phi(s)
+manifold_dim: 0          # 0 -> phi is the full masked-mean pool (M1)
+cycle_loss_weight: 0.0   # M2
+ib_beta: 0.0             # M2
+
+# --- denoiser objective ---
+denoiser_p_mean: -1.5
+denoiser_p_std: 0.8
+denoiser_noise_scale: 2.0
+t_eps: 0.05
+time_schedule: "logit_normal"
+
+# --- decoder objective ---
+decoder_prob: 0.2
+decoder_noise_scale: 5.0
+decoder_p_mean: 0.8
+decoder_p_std: 0.8
+
+# --- conditioning ---
+self_cond_prob: 0.5
+
+# --- optimization ---
+optimizer: "adamw"
+global_batch_size: 80
+blr: 0.001
+weight_decay: 0.0
+warmup_steps: 1000
+ema_decay1: 0.9999
+epochs: 60
+
+# --- logging / checkpoints ---
+log_freq: 50
+save_freq: 2
+eval_freq: 0.5      # <1 -> NO in-loop generation (phi-aware sampling lives in eval_semantic.py)
+online_eval: false
+eval_use_ema: false
+
+# --- sampling / output ---
+sampling_configs_path: "src/configs/sampling_configs/uncond_sampling_configs.yml"
+num_samples: 10
+output_dir: "/mnt/faster3/lc2762/elf_tinystories_sm_output"
+use_wandb: false
+seed: 42

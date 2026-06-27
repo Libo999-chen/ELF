@@ -172,13 +172,17 @@ def main():
         num_self_cond_cfg_tokens=config.num_self_cond_cfg_tokens,
         vocab_size=vocab_size,
         num_model_mode_tokens=config.num_model_mode_tokens,
+        num_phi_tokens=config.num_phi_tokens if config.semantic_factorization else 0,
         bottleneck_dim=config.bottleneck_dim,
     )
 
     log_for_0("Initializing ELF model...")
+    dummy_phi = (
+        jnp.ones((1, encoder_config.d_model)) if config.semantic_factorization else None
+    )
     init_args = dict(
         x=dummy_x, t=dummy_t, deterministic=True,
-        self_cond_cfg_scale=dummy_self_cond_cfg_scale,
+        self_cond_cfg_scale=dummy_self_cond_cfg_scale, phi=dummy_phi,
     )
     with cpu_ctx():
         elf_params = model.init(init_rng, **init_args)

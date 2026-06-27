@@ -92,6 +92,15 @@ class Config:
     self_cond_cfg_min: float = 0.5
     self_cond_cfg_max: float = 5.0
 
+    # Semantic-manifold factorization (SM-ELF): x = phi(s) + r, flow on residual r.
+    # When False, behaves exactly like vanilla ELF (all phi paths are no-ops).
+    semantic_factorization: bool = False
+    num_phi_tokens: int = 4       # In-context conditioning tokens carrying phi(s)
+    manifold_dim: int = 0         # k; 0 -> phi is the full masked-mean pool (M1).
+                                  # >0 -> low-rank bottleneck code c in R^k (M2).
+    cycle_loss_weight: float = 0.0  # lambda_cyc for the semantic-consistency loss (M2)
+    ib_beta: float = 0.0          # information-bottleneck KL weight on the code (M2)
+
     # Training (optimizer + schedule)
     epochs: int = 200
     warmup_epochs: float = None
