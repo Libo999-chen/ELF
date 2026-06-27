@@ -56,7 +56,7 @@ echo "[chain] $(date '+%F %T') C1 done -> logs/c1_m2_result.log" | tee -a "$LOG"
 # --- C2: sentiment steering sweep ---
 echo "==================== C2 @ M2 ${CKPT} ====================" >> tinystories_demo/logs/c2_m2_result.log
 python3 src/eval_steering.py --config "$M2_CFG" --checkpoint_path "$CKPT" \
-  --label-stories 200 --samples-per-alpha 24 --alphas -3,-2,-1,0,1,2,3 \
+  --label-stories 200 --samples-per-alpha 24 --alphas=-3,-2,-1,0,1,2,3 \
   >> tinystories_demo/logs/c2_m2_result.log 2>&1
 echo "[chain] $(date '+%F %T') C2 done -> logs/c2_m2_result.log" | tee -a "$LOG"
 echo "[chain] $(date '+%F %T') ALL DONE." | tee -a "$LOG"
