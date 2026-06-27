@@ -17,6 +17,8 @@ setup_env() {
   export PATH="${NVCC_DIR}/bin:${PATH}"
   export JAX_PLATFORMS="${JAX_PLATFORMS:-cuda}"
   export XLA_PYTHON_CLIENT_PREALLOCATE=false
+  NV_DIR=$(python3 -c "import os,nvidia; print(os.path.dirname(nvidia.__file__))")
+  export LD_LIBRARY_PATH="$(ls -d ${NV_DIR}/*/lib 2>/dev/null | tr '\n' ':')/usr/local/cuda-11.7/lib64:${LD_LIBRARY_PATH:-}"
   export HF_HOME="${HF_HOME:-/mnt/faster3/lc2762/hf_cache}"
   export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-/mnt/faster3/lc2762/hf_cache}"
 }

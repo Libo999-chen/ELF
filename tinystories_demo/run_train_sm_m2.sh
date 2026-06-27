@@ -8,6 +8,11 @@ NVCC_DIR=$(python3 -c "import nvidia.cuda_nvcc, os; print(os.path.dirname(nvidia
 export XLA_FLAGS="--xla_gpu_cuda_data_dir=${NVCC_DIR} ${XLA_FLAGS:-}"
 export PATH="${NVCC_DIR}/bin:${PATH}"
 export JAX_PLATFORMS="${JAX_PLATFORMS:-cuda}"
+# Force the pip-installed CUDA libs (newer cuBLAS/cuDNN) ahead of any system CUDA.
+# Hosts like death have an empty LD_LIBRARY_PATH over non-interactive ssh and would
+# otherwise load a too-old system cuBLAS, failing jax's version check.
+NV_DIR=$(python3 -c "import os,nvidia; print(os.path.dirname(nvidia.__file__))")
+export LD_LIBRARY_PATH="$(ls -d ${NV_DIR}/*/lib 2>/dev/null | tr '\n' ':')/usr/local/cuda-11.7/lib64:${LD_LIBRARY_PATH:-}"
 # Allocate GPU memory on demand (don't grab 75% up front) so we coexist with other
 # users sharing these GPUs, and avoid first-step OOM.
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
