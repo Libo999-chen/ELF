@@ -9,7 +9,9 @@ TRAIN_PAT="${1:?train pattern}"; CKPT_DIR="${2:?ckpt dir}"; MDIM="${3:?manifold_
 RESULT="${4:?result log}"; GPU="${5:-0}"
 
 echo "[orth] $(date '+%F %T') waiting for training [$TRAIN_PAT] to finish..." | tee -a "$RESULT"
-while pgrep -f "$TRAIN_PAT" >/dev/null; do sleep 300; done
+# Match only the real python training line (the pattern also appears in this
+# chain's own argv, so filter for "python3 src/train.py" to avoid self-matching).
+while pgrep -af "$TRAIN_PAT" | grep -q "python3 src/train.py"; do sleep 300; done
 echo "[orth] $(date '+%F %T') training done." | tee -a "$RESULT"
 
 latest=$(ls -d "$CKPT_DIR"/checkpoint_* 2>/dev/null | sed 's#.*/checkpoint_##' | grep -E '^[0-9]+$' | sort -n | tail -1)
