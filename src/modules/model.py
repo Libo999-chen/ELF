@@ -32,6 +32,17 @@ class ManifoldCode(nn.Module):
         return phi, mu, logvar
 
 
+def apply_manifold_code(manifold_params, pooled, code_dim, out_dim):
+    """Re-probe the trained manifold encoder standalone (M2 cycle / steering).
+
+    Reuses the sub-params created by the ManifoldCode inside ELF.__call__
+    (stored under params['manifold']), so it shares weights with the forward
+    pass without needing a second @compact method on ELF.
+    Returns (phi_lift, mu, logvar).
+    """
+    return ManifoldCode(code_dim, out_dim).apply({"params": manifold_params}, pooled)
+
+
 class ELFBlock(nn.Module):
     """ELF Transformer block."""
     hidden_size: int
@@ -76,14 +87,6 @@ class ELF(nn.Module):
     num_phi_tokens: int = 0  # If > 0, prepend in-context tokens carrying the semantic code phi(s)
     manifold_dim: int = 0  # M2: if > 0, phi is produced by a low-rank ManifoldCode (k = manifold_dim)
     vocab_size: int = 0  # Vocabulary size for decoder unembedding
-
-    def reencode(self, pooled):
-        """M2 helper: pooled latent (B, C) -> (phi_lift, mu, logvar).
-
-        Shares params with the ManifoldCode used in __call__ (same name='manifold'),
-        so it can re-probe a reconstruction for the cycle-consistency loss.
-        """
-        return ManifoldCode(self.manifold_dim, self.text_encoder_dim, name='manifold')(pooled)
 
     def build_context(self, t, self_cond_cfg_scale=None, phi=None):
         prefix_tokens = []

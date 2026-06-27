@@ -37,7 +37,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from modules.t5_encoder import get_encoder
-from modules.model import ELF_models
+from modules.model import ELF_models, apply_manifold_code
 from utils.logging_utils import log_for_0
 from utils.checkpoint_utils import load_encoder_checkpoint, load_checkpoint
 from utils.train_utils import TrainState
@@ -162,7 +162,7 @@ def main():
     for s in range(0, N, B):
         x0 = _encode(ids[s:s + B], valid[s:s + B], enc_model.apply, enc_params, cfg)
         pooled = compute_phi(x0, valid[s:s + B])[:, 0, :]
-        _, mu, _ = state.apply_fn({"params": params}, pooled, method="reencode")
+        _, mu, _ = apply_manifold_code(params["manifold"], pooled, cfg.manifold_dim, d)
         mus.append(np.asarray(mu))
     mu = np.concatenate(mus, axis=0)  # (N, k)
     labels = np.array([lexicon_sentiment(t) for t in texts])

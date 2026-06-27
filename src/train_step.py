@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from utils.train_utils import TrainState
 from utils.encoder_utils import encode_text
 from utils.semantic_utils import compute_phi
+from modules.model import apply_manifold_code
 from utils.sampling_utils import (
     sample_cfg_scale, add_noise, sample_timesteps,
     net_out_to_v_x, restore_cond,
@@ -90,7 +91,8 @@ def train_step(
             # residual target so the manifold encoder is trained through the
             # conditioning-prefix / cycle / IB paths, not by making its own
             # regression target easier to hit.
-            phi_lift_sg, _, _ = state.apply_fn({"params": state.params}, phi_vec, method="reencode")
+            phi_lift_sg, _, _ = apply_manifold_code(
+                state.params["manifold"], phi_vec, config.manifold_dim, x0.shape[-1])
             flow_target = x0 - jax.lax.stop_gradient(phi_lift_sg)[:, None, :]
         else:
             flow_target = x0 - phi          # M1: mean-pool residual
@@ -249,12 +251,13 @@ def train_step(
             cyc_loss = jnp.zeros(())
             ib_loss = jnp.zeros(())
             if config.semantic_factorization and config.manifold_dim > 0:
-                phi_lift_g, mu, logvar = state.apply_fn({"params": params}, phi_vec, method="reencode")
+                mdim, edim = config.manifold_dim, x0.shape[-1]
+                phi_lift_g, mu, logvar = apply_manifold_code(params["manifold"], phi_vec, mdim, edim)
                 ib_loss = 0.5 * jnp.mean(mu ** 2 + jnp.exp(logvar) - logvar - 1.0)
                 # x_hat = phi + r_hat; re-probe its code and match the conditioning code.
                 x_hat = phi_lift_g[:, None, :] + x_pred
                 pooled_hat = compute_phi(x_hat, loss_mask)[:, 0, :]
-                _, mu_hat, _ = state.apply_fn({"params": params}, pooled_hat, method="reencode")
+                _, mu_hat, _ = apply_manifold_code(params["manifold"], pooled_hat, mdim, edim)
                 cyc_loss = jnp.mean((mu_hat - jax.lax.stop_gradient(mu)) ** 2)
 
             total = l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
