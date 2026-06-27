@@ -173,6 +173,7 @@ def main():
         vocab_size=vocab_size,
         num_model_mode_tokens=config.num_model_mode_tokens,
         num_phi_tokens=config.num_phi_tokens if config.semantic_factorization else 0,
+        manifold_dim=config.manifold_dim if config.semantic_factorization else 0,
         bottleneck_dim=config.bottleneck_dim,
     )
 

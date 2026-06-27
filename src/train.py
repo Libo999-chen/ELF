@@ -195,6 +195,7 @@ def run_training(config):
         vocab_size=vocab_size,
         num_model_mode_tokens=config.num_model_mode_tokens,
         num_phi_tokens=config.num_phi_tokens if config.semantic_factorization else 0,
+        manifold_dim=config.manifold_dim if config.semantic_factorization else 0,
         bottleneck_dim=config.bottleneck_dim,
     )
 
@@ -404,6 +405,8 @@ def run_training(config):
                 avg_loss = float(jnp.mean(gathered["loss"]))
                 avg_l2_loss = float(jnp.mean(gathered["l2_loss"]))
                 avg_ce_loss = float(jnp.mean(gathered["ce_loss"]))
+                avg_cyc_loss = float(jnp.mean(gathered["cyc_loss"])) if "cyc_loss" in gathered else 0.0
+                avg_ib_loss = float(jnp.mean(gathered["ib_loss"])) if "ib_loss" in gathered else 0.0
                 now = time.time()
                 steps_per_sec = (global_step - last_log_step) / max(now - last_log_time, 1e-8)
                 current_lr = lr_schedule((global_step - 1) // grad_accum_steps)
@@ -420,6 +423,7 @@ def run_training(config):
                     tqdm.write(
                         f"INFO - engine - Step {global_step}: loss={avg_loss:.4f}, "
                         f"l2={avg_l2_loss:.4f}, ce={avg_ce_loss:.4f}, "
+                        f"cyc={avg_cyc_loss:.4f}, ib={avg_ib_loss:.4f}, "
                         f"lr={current_lr:.2e}, steps/sec={steps_per_sec:.2f}"
                     )
                     if config.use_wandb:

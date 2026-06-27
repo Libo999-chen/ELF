@@ -145,6 +145,7 @@ def main():
         vocab_size=tokenizer.vocab_size,
         num_model_mode_tokens=cfg.num_model_mode_tokens,
         num_phi_tokens=cfg.num_phi_tokens if cfg.semantic_factorization else 0,
+        manifold_dim=cfg.manifold_dim if cfg.semantic_factorization else 0,
         bottleneck_dim=cfg.bottleneck_dim,
     )
     dummy_phi = jnp.ones((1, d_model)) if cfg.semantic_factorization else None

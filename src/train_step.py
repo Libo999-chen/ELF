@@ -83,9 +83,17 @@ def train_step(
     # positions; the flow then denoises the residual r0 = x0 - phi rather than x0.
     # The decoder (CE) branch still operates on the full x0.
     if config.semantic_factorization:
-        phi = compute_phi(x0, loss_mask)   # (B, 1, C)
-        phi_vec = phi[:, 0, :]             # (B, C) for the conditioning prefix
-        flow_target = x0 - phi             # residual r0, broadcast over S
+        phi = compute_phi(x0, loss_mask)   # (B, 1, C) pooled latent
+        phi_vec = phi[:, 0, :]             # (B, C) conditioning input to the model
+        if config.manifold_dim > 0:
+            # M2: phi(s) = U c is the low-rank lift. Use a stop-grad lift for the
+            # residual target so the manifold encoder is trained through the
+            # conditioning-prefix / cycle / IB paths, not by making its own
+            # regression target easier to hit.
+            phi_lift_sg, _, _ = state.apply_fn({"params": state.params}, phi_vec, method="reencode")
+            flow_target = x0 - jax.lax.stop_gradient(phi_lift_sg)[:, None, :]
+        else:
+            flow_target = x0 - phi          # M1: mean-pool residual
     else:
         phi_vec = None
         flow_target = x0
@@ -212,7 +220,7 @@ def train_step(
             log_probs = jax.nn.log_softmax(decoder_logits.astype(jnp.float32), axis=-1)
             ce = -jnp.take_along_axis(log_probs, decoder_targets[..., None], axis=-1).squeeze(-1)
             ce_loss = (ce * loss_mask).sum() / jnp.maximum(loss_mask.sum(), 1.0)
-            return ce_loss, ce_loss, jnp.zeros(())
+            return ce_loss, ce_loss, jnp.zeros(()), jnp.zeros(()), jnp.zeros(())
 
         def _denoiser_branch(_):
             # Denoiser mode: x0-noised latent (denoiser_z) at random t, L2 loss on velocity.
@@ -230,26 +238,42 @@ def train_step(
                 decoder_step_active=jnp.array(False),
                 phi=phi_vec,
             )
-            v_pred, _ = net_out_to_v_x(net_out, denoiser_z, denoiser_t, t_eps)
+            v_pred, x_pred = net_out_to_v_x(net_out, denoiser_z, denoiser_t, t_eps)
             v_final_target = get_v_target(
                 params, denoiser_z, denoiser_t, base_v_target=v_target, x_tokens=flow_target,
             )
             per_dim_loss = (v_pred - v_final_target) ** 2
             l2_loss = reduce_token_loss(jnp.mean(per_dim_loss, axis=-1), loss_mask)
-            return l2_loss, jnp.zeros(()), l2_loss
 
-        loss, ce_loss, l2_loss = jax.lax.cond(
+            # M2: information-bottleneck KL on the code + semantic-consistency (cycle).
+            cyc_loss = jnp.zeros(())
+            ib_loss = jnp.zeros(())
+            if config.semantic_factorization and config.manifold_dim > 0:
+                phi_lift_g, mu, logvar = state.apply_fn({"params": params}, phi_vec, method="reencode")
+                ib_loss = 0.5 * jnp.mean(mu ** 2 + jnp.exp(logvar) - logvar - 1.0)
+                # x_hat = phi + r_hat; re-probe its code and match the conditioning code.
+                x_hat = phi_lift_g[:, None, :] + x_pred
+                pooled_hat = compute_phi(x_hat, loss_mask)[:, 0, :]
+                _, mu_hat, _ = state.apply_fn({"params": params}, pooled_hat, method="reencode")
+                cyc_loss = jnp.mean((mu_hat - jax.lax.stop_gradient(mu)) ** 2)
+
+            total = l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
+            return total, jnp.zeros(()), l2_loss, cyc_loss, ib_loss
+
+        loss, ce_loss, l2_loss, cyc_loss, ib_loss = jax.lax.cond(
             decoder_step_active, _decoder_branch, _denoiser_branch, None,
         )
-        return loss, (l2_loss, ce_loss)
+        return loss, (l2_loss, ce_loss, cyc_loss, ib_loss)
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, (l2_loss_val, ce_loss_val)), grads = grad_fn(state.params)
+    (loss, (l2_loss_val, ce_loss_val, cyc_loss_val, ib_loss_val)), grads = grad_fn(state.params)
 
     grads = jax.lax.pmean(grads, axis_name="batch")
     loss = jax.lax.pmean(loss, axis_name="batch")
     l2_loss_val = jax.lax.pmean(l2_loss_val, axis_name="batch")
     ce_loss_val = jax.lax.pmean(ce_loss_val, axis_name="batch")
+    cyc_loss_val = jax.lax.pmean(cyc_loss_val, axis_name="batch")
+    ib_loss_val = jax.lax.pmean(ib_loss_val, axis_name="batch")
 
     new_state = state.apply_gradients(grads=grads, dropout_rng=new_dropout_rng)
 
@@ -277,9 +301,17 @@ def train_step(
     active_l2_loss_val = jnp.where(
         denoiser_prob_arr > 0.0, l2_loss_val / denoiser_prob_arr, jnp.zeros_like(l2_loss_val),
     )
+    active_cyc_loss_val = jnp.where(
+        denoiser_prob_arr > 0.0, cyc_loss_val / denoiser_prob_arr, jnp.zeros_like(cyc_loss_val),
+    )
+    active_ib_loss_val = jnp.where(
+        denoiser_prob_arr > 0.0, ib_loss_val / denoiser_prob_arr, jnp.zeros_like(ib_loss_val),
+    )
     metrics = {
         "loss": loss,
         "l2_loss": active_l2_loss_val,
         "ce_loss": active_ce_loss_val,
+        "cyc_loss": active_cyc_loss_val,
+        "ib_loss": active_ib_loss_val,
     }
     return new_state, metrics

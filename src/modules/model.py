@@ -9,6 +9,29 @@ from modules.layers import (
 )
 
 
+class ManifoldCode(nn.Module):
+    """Low-rank semantic-manifold code (M2): pooled latent -> c in R^k -> phi = U c.
+
+    The k-dim bottleneck (code_dim << out_dim) forces phi to carry only reusable
+    global structure. Returns (phi_lift, mu, logvar). The forward uses a
+    deterministic code c = mu; logvar is produced for the information-bottleneck
+    KL only. (Upgrade path: sample c = mu + exp(.5*logvar)*eps when not
+    deterministic, threading a 'code' rng — left off for the scaffold.)
+    """
+    code_dim: int      # k
+    out_dim: int       # d (text_encoder_dim)
+    hidden: int = 256
+
+    @nn.compact
+    def __call__(self, pooled):
+        h = nn.gelu(nn.Dense(self.hidden, name='enc_in')(pooled))
+        mu = nn.Dense(self.code_dim, name='enc_mu')(h)
+        logvar = nn.Dense(self.code_dim, name='enc_logvar')(h)
+        c = mu  # deterministic code for the scaffold
+        phi = nn.Dense(self.out_dim, use_bias=False, name='lift')(c)  # U c
+        return phi, mu, logvar
+
+
 class ELFBlock(nn.Module):
     """ELF Transformer block."""
     hidden_size: int
@@ -51,7 +74,16 @@ class ELF(nn.Module):
     num_self_cond_cfg_tokens: int = 4  # Number of in-context self-cond CFG tokens
     num_model_mode_tokens: int = 0  # If > 0, prepend learnable model-mode tokens that signal decoding mode
     num_phi_tokens: int = 0  # If > 0, prepend in-context tokens carrying the semantic code phi(s)
+    manifold_dim: int = 0  # M2: if > 0, phi is produced by a low-rank ManifoldCode (k = manifold_dim)
     vocab_size: int = 0  # Vocabulary size for decoder unembedding
+
+    def reencode(self, pooled):
+        """M2 helper: pooled latent (B, C) -> (phi_lift, mu, logvar).
+
+        Shares params with the ManifoldCode used in __call__ (same name='manifold'),
+        so it can re-probe a reconstruction for the cycle-consistency loss.
+        """
+        return ManifoldCode(self.manifold_dim, self.text_encoder_dim, name='manifold')(pooled)
 
     def build_context(self, t, self_cond_cfg_scale=None, phi=None):
         prefix_tokens = []
@@ -122,8 +154,17 @@ class ELF(nn.Module):
                 mode_mask = jnp.ones((B, self.num_model_mode_tokens), dtype=attention_mask.dtype)
                 attention_mask = jnp.concatenate([mode_mask, attention_mask], axis=1)
 
+        # M2: when manifold_dim > 0, the incoming phi is the pooled latent (B, C);
+        # map it through the low-rank ManifoldCode to get the conditioning vector.
+        # M1 (manifold_dim == 0) uses phi (the masked mean) directly.
+        phi_for_prefix = phi
+        if phi is not None and self.manifold_dim > 0:
+            phi_for_prefix, _, _ = ManifoldCode(
+                self.manifold_dim, self.text_encoder_dim, name='manifold',
+            )(phi)
+
         prefix_len = 0
-        context_prefix_tokens = self.build_context(t, self_cond_cfg_scale, phi=phi)
+        context_prefix_tokens = self.build_context(t, self_cond_cfg_scale, phi=phi_for_prefix)
         if context_prefix_tokens:
             prefix_tokens = jnp.concatenate(context_prefix_tokens, axis=1)
             prefix_len = prefix_tokens.shape[1]
