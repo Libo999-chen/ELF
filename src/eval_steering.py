@@ -83,6 +83,14 @@ def attr_scores(text):
     return float(animal), float(female), float(len(toks))
 
 
+def gender_label(text):
+    """+1 female-leaning, -1 male-leaning, 0 neither (for fitting the gender axis)."""
+    toks = [w.strip(".,!?;:\"'").lower() for w in text.split()]
+    f = sum(t in FEMALE_WORDS for t in toks)
+    m = sum(t in MALE_WORDS for t in toks)
+    return 1 if f > m else (-1 if m > f else 0)
+
+
 def _pad_batch(list_of_ids, max_length, pad_id):
     B = len(list_of_ids)
     ids = np.full((B, max_length), pad_id, dtype=np.int32)
@@ -110,6 +118,8 @@ def parse_args():
     p.add_argument("--label-stories", type=int, default=200)
     p.add_argument("--samples-per-alpha", type=int, default=24)
     p.add_argument("--alphas", type=str, default="-3,-2,-1,0,1,2,3")
+    p.add_argument("--orthogonalize", action="store_true",
+                   help="Remove the gender direction from the sentiment axis (disentanglement test).")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=str, default=None)
     return p.parse_args()
@@ -200,7 +210,19 @@ def main():
     u = pos.mean(0) - neg.mean(0)
     u = u / (np.linalg.norm(u) + 1e-8)
     c0 = mu.mean(0)
-    log_for_0(f"codes mu: {mu.shape} | pos={len(pos)} neg={len(neg)} | axis ||u||=1")
+
+    # Gender axis (for the orthogonalization / disentanglement test).
+    glab = np.array([gender_label(t) for t in texts])
+    gp, gn = mu[glab > 0], mu[glab < 0]
+    u_g = gp.mean(0) - gn.mean(0)
+    u_g = u_g / (np.linalg.norm(u_g) + 1e-8)
+    cos_sg = float(u @ u_g)  # how much the raw sentiment axis is contaminated by gender
+    log_for_0(f"codes mu: {mu.shape} | sent(pos={len(pos)},neg={len(neg)}) "
+              f"gender(f={len(gp)},m={len(gn)}) | cos(sent,gender)={cos_sg:+.3f}")
+    if args.orthogonalize:
+        u = u - (u @ u_g) * u_g
+        u = u / (np.linalg.norm(u) + 1e-8)
+        log_for_0(f"ORTHOGONALIZED sentiment axis against gender; new cos(sent,gender)={float(u @ u_g):+.4f}")
 
     # --- steering sweep ---
     M = args.samples_per_alpha

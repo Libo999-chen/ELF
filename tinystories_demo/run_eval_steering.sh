@@ -4,9 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CKPT="${1:?usage: run_eval_steering.sh <checkpoint_path> [cuda_device] [config]}"
+CKPT="${1:?usage: run_eval_steering.sh <checkpoint_path> [cuda_device] [config] [extra args...]}"
 CUDA_DEV="${2:-7}"
 CONFIG="${3:-tinystories_demo/train_tinystories_SM-ELF-M2.yml}"
+shift $(( $# < 3 ? $# : 3 ))   # remaining args ($@) are passed through to eval_steering.py
 
 # CUDA 11.8 ptxas for the old driver (minor-version compat), same as training.
 NVCC_DIR=$(python3 -c "import nvidia.cuda_nvcc, os; print(os.path.dirname(nvidia.cuda_nvcc.__file__))")
@@ -25,4 +26,4 @@ export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-/mnt/faster3/lc2762/hf_cache}"
 exec python3 src/eval_steering.py \
   --config "$CONFIG" \
   --checkpoint_path "$CKPT" \
-  --label-stories 200 --samples-per-alpha 24
+  --label-stories 200 --samples-per-alpha 24 "$@"
