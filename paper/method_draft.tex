@@ -62,9 +62,10 @@ on a decontaminated disentanglement test it is in fact \emph{worse}
 (\S\ref{sec:exp}). (iii) A mechanism---attribute \emph{superposition} induced by
 the bottleneck---established both behaviorally (a monotonic code-dimension sweep)
 and \emph{directly}, by applying the Manifold Probe of \cite{manifold2026} to the
-code space and showing the measured superposition predicts off-target leakage
-(Pearson $r{=}0.995$), tying controllable generation to the superposition
-phenomenon.
+code space: the measured superposition grows strictly monotonically as the code
+shrinks (5 seeds, all six code sizes---the study's most robust trend) and predicts
+the multi-seed off-target leakage at Pearson $r{=}0.90$, tying controllable
+generation to the superposition phenomenon.
 
 % ===========================================================================
 \section{Method}
@@ -270,10 +271,13 @@ contaminated by gender: steering sentiment drags the protagonist's gender
 for both models. The models separate, however, once we project the gender
 direction out of the sentiment axis and steer the orthogonalized axis: the
 \emph{model's own} code geometry then determines how much gender still leaks
-(Table~\ref{tab:leak}). The full-rank conditioning isolates the attributes far
+(Table~\ref{tab:leak}). The full-rank conditioning isolates the attributes
 better (gender leakage $0.33$) than the low-rank code ($0.88$). Compressing the
 conditioning into $k{=}64$ dimensions does not disentangle---it forces correlated
-attributes into \emph{superposition}, reducing their linear separability.
+attributes into \emph{superposition}, reducing their linear separability. (These
+are single-seed values; the robust multi-seed leakage with error bars and a
+non-saturating metric, which tempers the exact numbers but keeps the conclusion,
+is in Table~\ref{tab:leakrobust}.)
 
 \begin{table}[h]\centering\small
 \begin{tabular}{lcc}
@@ -297,28 +301,17 @@ $U\in\R^{d\times k}$ and the code MLP change shape with $k$, so weights cannot b
 shared---trained under identical hyperparameters and budget, the only variable
 being $k$), with the mean-pool model (M1) as a separate no-bottleneck reference.
 
-The epoch-30 sweep is complete across all five learned-$k$ points and is
-\emph{monotone non-increasing} in $k$, exactly as the superposition hypothesis
-predicts (Table~\ref{tab:ksweep}): the two smallest codes saturate the $[0,1]$
-ceiling ($k{=}8,16\!\to\!1.00$), then leakage falls to $0.67$ at $k{=}256$ and
-$0.58$ at $k{=}512$, against the mean-pool reference's $0.33$. The matched
-60-epoch subset confirms the trend at full budget---$1.00\,(k{=}16)>0.88\,(k{=}64)
->0.75\,(k{=}256)>0.33\,(\text{M1})$---with the two endpoints $k\in\{8,512\}$
-finishing their 60-epoch runs at the time of writing (their epoch-30 values,
-$1.00$ and $0.58$, already bracket the curve). Every halving of the code
-dimension increases off-target entanglement.
-
-\paragraph{Dimensionality dominates, but the parametrization adds an offset.}
-A second, subtler finding falls out of the endpoint: even at $k{=}d{=}512$, where
-the code is \emph{not} dimensionally bottlenecked, the learned code still leaks
-$0.58$ versus the mean-pool M1's $0.33$ at the same epoch. The learned
-conditioning parametrization (MLP encoder $+$ lift $+$ cycle $+$ IB) therefore
-introduces entanglement of its own, beyond what naive mean-pool conditioning
-does. The sweep separates the two effects: the bottleneck \emph{dimensionality}
-sets the monotone trend, while the learned parametrization sets a roughly constant
-\emph{offset} above the mean-pool floor. It is the dimensionality, not the cycle
-loss or conditioning mechanism per se, that governs how strongly correlated
-attributes are forced into superposition.
+As a single-seed behavioral read this trend appears (Table~\ref{tab:ksweep}): at
+the matched 60-epoch budget leakage falls $1.00\,(k{=}16)>0.88\,(k{=}64)
+>0.75\,(k{=}256)$ toward the mean-pool reference's $0.33$. We caution
+immediately, however, that this is a \emph{single run} of a \emph{saturating}
+statistic, and (next paragraph) it does not survive intact: the fraction range
+hits its $[0,1]$ ceiling for small $k$, and run-to-run variance is large enough
+that the exact values---and the strict step-by-step ordering---are unreliable
+(e.g.\ a single-seed $k{=}8$ run gave $0.67$, below $k{=}16$). What is robust is
+the \emph{endpoint gap} and the trend in the mean, which we establish next with
+error bars and a non-saturating metric, and confirm mechanistically by directly
+measuring superposition.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{l ccccc c}
@@ -335,13 +328,57 @@ size $k$. Each learned-$k$ model is trained from scratch under identical budget;
 M1 ($d{=}512$ mean-pool, no bottleneck/cycle/IB) is the no-bottleneck reference.
 The epoch-30 row is complete and monotone non-increasing in $k$
 ($1.00,1.00,0.67,0.58$ for $k{=}8,16,256,512$ vs.\ $0.33$ for M1); the matched
-60-epoch row confirms it ($1.00\!>\!0.88\!>\!0.75\!>\!0.33$). On-target sentiment
-control is $0\!\to\!1$ and monotonic at every $k$. ``(run)'' = 60-epoch run still
-training; ``---'' = the $k{=}64$ epoch-30 checkpoint was rotated out before
-evaluation (its 60-epoch value is $0.88$). Note the learned $k{=}512$ code leaks
-\emph{more} than mean-pool M1 at equal dimension, isolating a parametrization
-offset distinct from the dimensionality trend.}
+60-epoch row confirms it ($1.00\!>\!0.88\!>\!0.75\!>\!0.33$). \textbf{Single seed
+and saturating}---superseded by the multi-seed, non-saturating
+Table~\ref{tab:leakrobust}; shown as the initial behavioral observation only.
+``(run)''/``---'' mark values not yet available at submission time of this row.}
 \label{tab:ksweep}
+\end{table}
+
+\paragraph{Robustness: error bars, a non-saturating metric, and two honest caveats.}
+The sweep above is one steering run of a statistic that saturates at $1.0$. We
+re-measure leakage properly: a held-out \emph{continuous} gender classifier
+(difference-of-means in the frozen embedding space, trained on real stories and
+applied to generations) yields a non-saturating \emph{logit-shift} and an
+\emph{AUC} between the steering extremes, and we report five evaluation seeds
+(bootstrapped axis/classifier, resampled generation noise) for error bars
+(Table~\ref{tab:leakrobust}). The robust picture is more nuanced than the single
+run, and the nuances are informative. (i) The mean logit-shift \emph{decreases} as
+the code grows over the learned bottleneck range
+$k{=}8\!\to\!16\!\to\!64\!\to\!256$ ($1.31\!>\!0.97\!>\!0.76\!>\!0.45$), and the
+endpoints are cleanly separated from the mean-pool floor ($k{=}16$:
+$0.97\!\pm\!0.15$ vs.\ M1: $0.37\!\pm\!0.06$); adjacent $k$ overlap at five eval
+seeds, so we claim the trend and the endpoint gap, not strict step-by-step
+separation---tightening the middle needs \emph{model-level} seeds (each $k$
+retrained), the main remaining rigor gap. (ii) \textbf{Capacity collapse at
+$k{=}8$:} on-target sentiment control, $1.0$ at every larger $k$, drops to
+$0.63\!\pm\!0.06$ at $k{=}8$---the extreme bottleneck can no longer even represent
+the steered attribute, so leakage and control fail together. (iii)
+\textbf{Parametrization offset at $k{=}d$:} the learned $k{=}512$ code leaks
+$0.81\!\pm\!0.29$, far above the mean-pool M1's $0.37$ at equal dimension and out
+of line with the dimensionality trend, even though its measured superposition is
+correctly low (next paragraph). The learned conditioning stack (MLP $+$ lift $+$
+cycle $+$ IB) thus introduces entanglement of its own, beyond the dimensional
+effect and beyond what the linear probe sees.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l cccccc}
+code dim $k$ & 8 & 16 & 64 & 256 & 512 (learned) & 512 (M1) \\
+\hline
+gender logit-shift (non-sat.) & $1.31\!\pm\!.25$ & $0.97\!\pm\!.15$ & $0.76\!\pm\!.30$ & $0.45\!\pm\!.12$ & $0.81\!\pm\!.29$ & $0.37\!\pm\!.06$ \\
+gender AUC (extremes)         & $0.87$ & $0.99$ & $0.77$ & $0.74$ & $0.88$ & $0.76$ \\
+frac.\ range (old, sat.)      & $0.59\!\pm\!.24$ & $0.98\!\pm\!.04$ & $0.92\!\pm\!.10$ & $0.79\!\pm\!.17$ & $0.54\!\pm\!.25$ & $0.76\!\pm\!.22$ \\
+on-target control $\Delta$    & $\mathbf{0.63\!\pm\!.06}$ & $1.0$ & $1.0$ & $1.0$ & $1.0$ & $1.0$ \\
+\end{tabular}
+\caption{Leakage with error bars (5 eval seeds: bootstrapped axis $+$ held-out
+gender classifier, resampled generation noise; 60-epoch checkpoints). The
+non-saturating logit-shift decreases as $k$ grows over $k{=}8\!\to\!256$ with the
+endpoint cleanly above the mean-pool floor; adjacent $k$ overlap (model-level seeds
+pending). Two departures from a pure dimensionality story: control collapses at
+$k{=}8$, and the learned $k{=}512$ leaks far above mean-pool M1 (parametrization
+offset). The single-seed values in Table~\ref{tab:ksweep} fall within these bars
+but are individually unreliable.}
+\label{tab:leakrobust}
 \end{table}
 
 \paragraph{Directly measuring superposition in code space.}
@@ -365,50 +402,60 @@ the metrics read $\approx 0$ for attributes on orthogonal axes and large for
 attributes packed into a shared direction, so a positive value is not an artifact
 of small $k$ (we subtract the random-direction baseline $1/k$).
 
-Every superposition measure increases \emph{strictly monotonically} as $k$ shrinks
-(Table~\ref{tab:superpos}), in lockstep with leakage. The interference of the
-specific steering pair---sentiment vs.\ gender, the attributes that actually
-leak---rises from $0.003$ at $k{=}512$ to $0.083$ at $k{=}16$ and predicts leakage
-almost exactly (Pearson $r{=}0.995$; Spearman $\rho{=}1.0$ for all three measures
-across the four points). This converts the superposition account from an inference
-into a measurement: shrinking the code does not merely reduce capacity, it forces
-correlated attributes to \emph{share encoding directions}, and the amount of that
-sharing tracks how strongly steering one attribute drags the other.
+Every superposition measure increases \emph{strictly monotonically} as $k$
+shrinks---across all \emph{six} code sizes and with five seeds, this is the
+cleanest and most robust signal in the study (Table~\ref{tab:superpos}). The
+interference of the specific steering pair---sentiment vs.\ gender, the attributes
+that actually leak---rises monotonically from $0.003$ at the mean-pool reference to
+$0.138$ at $k{=}8$. Against the \emph{robust} (multi-seed) leakage logit-shift it
+correlates at Pearson $r{=}0.90$ over all six points, rising to $r{=}0.97$
+(Spearman $\rho{=}1.0$) once the learned $k{=}512$ outlier is set aside---and that
+outlier is itself diagnostic: its behavioral leakage is inflated by the
+parametrization offset while its measured superposition is correctly low, exactly
+the dissociation one expects when entanglement comes from the conditioning stack
+rather than the bottleneck. This converts the superposition account from an
+inference into a measurement: where the dimensional mechanism applies, shrinking
+the code forces correlated attributes to \emph{share encoding directions}, and the
+amount of sharing tracks how strongly steering one attribute drags the other.
 
 \begin{table}[h]\centering\small
-\begin{tabular}{l ccccc}
-code dim $k$ & 512 (M1) & 256 & 64 & 16 & corr.\ leakage \\
+\begin{tabular}{l cccccc c}
+code dim $k$ & 8 & 16 & 64 & 256 & 512\,(lrn) & M1 & corr. \\
 \hline
-sentiment--gender interference   & 0.003 & 0.047 & 0.069 & 0.083 & $r{=}0.995$ \\
-mean off-diagonal interference   & 0.017 & 0.045 & 0.055 & 0.122 & $r{=}0.848$ \\
-capacity ratio ($\sum\!\dim\mathcal{Q}_a/k$) & 0.008 & 0.021 & 0.100 & 0.388 & $r{=}0.724$ \\
+sentiment--gender interference & 0.138 & 0.083 & 0.069 & 0.047 & 0.033 & 0.003 & $r{=}0.90$ \\
+mean off-diagonal interference & 0.166 & 0.122 & 0.055 & 0.045 & 0.028 & 0.017 & $r{=}0.88$ \\
+capacity ratio ($\sum\!\dim\mathcal{Q}_a/k$) & 0.700 & 0.388 & 0.100 & 0.021 & 0.010 & 0.008 & $r{=}0.89$ \\
 \hline
-off-target leakage (epoch 60)    & 0.33  & 0.75  & 0.875 & 1.00  & --- \\
+leakage logit-shift (5 seeds)  & 1.31 & 0.97 & 0.76 & 0.45 & 0.81 & 0.37 & --- \\
 \end{tabular}
 \caption{Superposition measured directly in code space with the Manifold
-Probe~\cite{manifold2026} ($N{=}1500$ stories, 5 seeds). Every measure grows
-strictly monotonically as $k$ shrinks and is rank-correlated with off-target
-leakage at Spearman $\rho{=}1.0$; the sentiment--gender readout interference---the
-pair that leaks---tracks leakage at Pearson $r{=}0.995$. Endpoints $k\in\{8,512$
-learned$\}$ pending the 60-epoch runs.}
+Probe~\cite{manifold2026} ($N{=}1500$ stories, 5 seeds), all six code sizes.
+Every measure grows \emph{strictly monotonically} as $k$ shrinks (the most robust
+trend in the paper) and correlates with the robust multi-seed leakage logit-shift
+at Pearson $r{=}0.88\text{--}0.90$ ($r{=}0.97$, Spearman $\rho{=}1.0$, excluding the
+learned $k{=}512$ outlier, whose leakage is inflated by the parametrization offset
+while its superposition is correctly low). ``lrn'' = learned $k{=}512$ code; M1 =
+mean-pool reference.}
 \label{tab:superpos}
 \end{table}
 
 \paragraph{Takeaway.} Contrary to the intuition that a compact ``semantic
 manifold'' code yields cleaner, more disentangled control, we find the opposite:
 a low-rank conditioning code induces attribute superposition and \emph{worse}
-linear separability than full-rank conditioning, while both achieve equal
-single-factor controllability. The code-dimension sweep makes the mechanism
-quantitative: orthogonalized leakage is monotone in $1/k$, and the sweep further
-separates a dimensionality-driven trend from a smaller, roughly constant offset
-contributed by the learned parametrization itself (the learned $k{=}d$ code still
-leaks more than naive mean-pool conditioning). Probing the code space directly
-confirms the cause is superposition---the attributes' encoding subspaces overlap
-more as $k$ shrinks, and that overlap predicts leakage ($r{=}0.995$ for the pair
-that leaks)---rather than a generic loss of capacity. Together this reframes the
-contribution from a better controllable LM toward a study of how the geometry of
-the conditioning variable governs disentanglement---connecting controllable
-generation directly to the superposition phenomenon of \cite{manifold2026}.
+linear separability than full-rank conditioning, while down to moderate $k$ both
+retain full single-factor controllability (control survives until the extreme
+$k{=}8$ bottleneck, where it collapses with leakage together). The directly
+measured superposition is the robust core: it grows strictly monotonically as the
+code shrinks (5 seeds, six code sizes) and predicts the multi-seed leakage at
+$r{=}0.90$. The behavioral leakage corroborates this in the mean but is noisier,
+and exposes two informative departures from a pure dimensionality story---capacity
+collapse at $k{=}8$ and a parametrization offset at $k{=}d$ (the learned full-rank
+code leaks well above mean-pool, while its superposition is correctly low). The
+honest remaining gap is model-level seeds to separate adjacent $k$. Together this
+reframes the contribution from a better controllable LM toward a study of how the
+geometry of the conditioning variable governs disentanglement---connecting
+controllable generation directly to the superposition phenomenon of
+\cite{manifold2026}.
 
 % ===========================================================================
 \begin{thebibliography}{9}
