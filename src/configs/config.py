@@ -100,6 +100,9 @@ class Config:
                                   # >0 -> low-rank bottleneck code c in R^k (M2).
     cycle_loss_weight: float = 0.0  # lambda_cyc for the semantic-consistency loss (M2)
     ib_beta: float = 0.0          # information-bottleneck KL weight on the code (M2)
+    decorrelation_weight: float = 0.0  # lambda_dec: penalize cos^2 between code-space
+                                  # sentiment & gender difference-of-means axes (mitigation).
+                                  # >0 requires lexicon labels in the batch.
 
     # Training (optimizer + schedule)
     epochs: int = 200

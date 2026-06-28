@@ -18,6 +18,28 @@ from utils.sampling_utils import (
 Array = jnp.ndarray
 
 
+def _decorrelation_loss(mu, sent, gender):
+    """Squared cosine between the code-space sentiment and gender difference-of-means
+    axes, computed over the GLOBAL batch via cross-device psum. Penalizing this
+    pushes the two attributes onto orthogonal readout directions (mitigation).
+    mu: (b, k) per-device codes; sent/gender: (b,) in {-1,0,+1}. Returns a scalar;
+    zero on devices/steps where either class is empty."""
+    def axis(lab):
+        lab = lab.astype(mu.dtype)
+        pos = (lab > 0).astype(mu.dtype)[:, None]
+        neg = (lab < 0).astype(mu.dtype)[:, None]
+        ps = jax.lax.psum(jnp.sum(pos * mu, axis=0), "batch")
+        pc = jax.lax.psum(jnp.sum(pos), "batch")
+        ns = jax.lax.psum(jnp.sum(neg * mu, axis=0), "batch")
+        nc = jax.lax.psum(jnp.sum(neg), "batch")
+        a = ps / jnp.maximum(pc, 1.0) - ns / jnp.maximum(nc, 1.0)
+        return a, (pc > 0) & (nc > 0)
+    us, ok_s = axis(sent)
+    ug, ok_g = axis(gender)
+    cos = jnp.sum(us * ug) / (jnp.linalg.norm(us) * jnp.linalg.norm(ug) + 1e-8)
+    return jnp.where(ok_s & ok_g, cos ** 2, 0.0)
+
+
 def train_step(
     state: TrainState,
     encoder_params: Dict,
@@ -32,6 +54,11 @@ def train_step(
 
     decoder_prob = config.decoder_prob
     decoder_noise_scale = config.decoder_noise_scale
+
+    # Decorrelation regularizer (mitigation): needs per-example lexicon labels.
+    use_decorr = getattr(config, "decorrelation_weight", 0.0) > 0
+    sent_lab = batch["sent_label"] if use_decorr else None
+    gender_lab = batch["gender_label"] if use_decorr else None
 
     new_dropout_rng, current_step_rng = jax.random.split(state.dropout_rng, 2)
     current_step_rng = jax.random.fold_in(current_step_rng, jax.lax.axis_index(axis_name="batch"))
@@ -222,7 +249,7 @@ def train_step(
             log_probs = jax.nn.log_softmax(decoder_logits.astype(jnp.float32), axis=-1)
             ce = -jnp.take_along_axis(log_probs, decoder_targets[..., None], axis=-1).squeeze(-1)
             ce_loss = (ce * loss_mask).sum() / jnp.maximum(loss_mask.sum(), 1.0)
-            return ce_loss, ce_loss, jnp.zeros(()), jnp.zeros(()), jnp.zeros(())
+            return ce_loss, ce_loss, jnp.zeros(()), jnp.zeros(()), jnp.zeros(()), jnp.zeros(())
 
         def _denoiser_branch(_):
             # Denoiser mode: x0-noised latent (denoiser_z) at random t, L2 loss on velocity.
@@ -250,6 +277,7 @@ def train_step(
             # M2: information-bottleneck KL on the code + semantic-consistency (cycle).
             cyc_loss = jnp.zeros(())
             ib_loss = jnp.zeros(())
+            dec_loss = jnp.zeros(())
             if config.semantic_factorization and config.manifold_dim > 0:
                 mdim, edim = config.manifold_dim, x0.shape[-1]
                 phi_lift_g, mu, logvar = apply_manifold_code(params["manifold"], phi_vec, mdim, edim)
@@ -259,17 +287,21 @@ def train_step(
                 pooled_hat = compute_phi(x_hat, loss_mask)[:, 0, :]
                 _, mu_hat, _ = apply_manifold_code(params["manifold"], pooled_hat, mdim, edim)
                 cyc_loss = jnp.mean((mu_hat - jax.lax.stop_gradient(mu)) ** 2)
+                # Decorrelation: push sentiment & gender code axes apart (mitigation).
+                if use_decorr:
+                    dec_loss = _decorrelation_loss(mu, sent_lab, gender_lab)
 
-            total = l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
-            return total, jnp.zeros(()), l2_loss, cyc_loss, ib_loss
+            total = (l2_loss + config.cycle_loss_weight * cyc_loss + config.ib_beta * ib_loss
+                     + config.decorrelation_weight * dec_loss)
+            return total, jnp.zeros(()), l2_loss, cyc_loss, ib_loss, dec_loss
 
-        loss, ce_loss, l2_loss, cyc_loss, ib_loss = jax.lax.cond(
+        loss, ce_loss, l2_loss, cyc_loss, ib_loss, dec_loss = jax.lax.cond(
             decoder_step_active, _decoder_branch, _denoiser_branch, None,
         )
-        return loss, (l2_loss, ce_loss, cyc_loss, ib_loss)
+        return loss, (l2_loss, ce_loss, cyc_loss, ib_loss, dec_loss)
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, (l2_loss_val, ce_loss_val, cyc_loss_val, ib_loss_val)), grads = grad_fn(state.params)
+    (loss, (l2_loss_val, ce_loss_val, cyc_loss_val, ib_loss_val, dec_loss_val)), grads = grad_fn(state.params)
 
     grads = jax.lax.pmean(grads, axis_name="batch")
     loss = jax.lax.pmean(loss, axis_name="batch")
@@ -277,6 +309,7 @@ def train_step(
     ce_loss_val = jax.lax.pmean(ce_loss_val, axis_name="batch")
     cyc_loss_val = jax.lax.pmean(cyc_loss_val, axis_name="batch")
     ib_loss_val = jax.lax.pmean(ib_loss_val, axis_name="batch")
+    dec_loss_val = jax.lax.pmean(dec_loss_val, axis_name="batch")
 
     new_state = state.apply_gradients(grads=grads, dropout_rng=new_dropout_rng)
 
@@ -310,11 +343,15 @@ def train_step(
     active_ib_loss_val = jnp.where(
         denoiser_prob_arr > 0.0, ib_loss_val / denoiser_prob_arr, jnp.zeros_like(ib_loss_val),
     )
+    active_dec_loss_val = jnp.where(
+        denoiser_prob_arr > 0.0, dec_loss_val / denoiser_prob_arr, jnp.zeros_like(dec_loss_val),
+    )
     metrics = {
         "loss": loss,
         "l2_loss": active_l2_loss_val,
         "ce_loss": active_ce_loss_val,
         "cyc_loss": active_cyc_loss_val,
         "ib_loss": active_ib_loss_val,
+        "dec_loss": active_dec_loss_val,
     }
     return new_state, metrics

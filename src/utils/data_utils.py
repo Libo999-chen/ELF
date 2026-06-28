@@ -93,6 +93,11 @@ def get_dataloader(
         for key in ("index", "input", "target"):
             if key in batch_list[0]:
                 result[key] = [item[key] for item in batch_list]
+        # decorrelation labels: stack as int arrays so they survive prepare_batch
+        # (which keeps only ndarray/jnp values) and shard with the batch.
+        for key in ("sent_label", "gender_label"):
+            if key in batch_list[0]:
+                result[key] = np.array([int(item[key]) for item in batch_list], dtype=np.int32)
         return result
 
     common = dict(
@@ -188,6 +193,25 @@ def load_dataset_split(path: str, dataset_cache_dir=None):
             ds = ds[splits[0]]
 
     ds.set_format(type="numpy", columns=ds.column_names)
+    return ds
+
+
+def add_lexicon_labels(ds, tokenizer, text_key="input_ids"):
+    """Add integer `sent_label`, `gender_label` columns (in {-1,0,1}) by decoding
+    each example's tokens and applying the lexicon. Used by the decorrelation
+    regularizer; only called when decorrelation_weight > 0."""
+    from utils.semantic_utils import lexicon_labels
+
+    def _label(batch):
+        texts = tokenizer.batch_decode(batch[text_key], skip_special_tokens=True)
+        sg = [lexicon_labels(t) for t in texts]
+        return {"sent_label": [s for s, _ in sg], "gender_label": [g for _, g in sg]}
+
+    cols = ds.column_names
+    ds = ds.map(_label, batched=True, batch_size=512,
+                desc="lexicon labels (decorrelation)")
+    keep = cols + ["sent_label", "gender_label"]
+    ds.set_format(type="numpy", columns=[c for c in keep if c in ds.column_names])
     return ds
 
 
