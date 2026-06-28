@@ -1,0 +1,25 @@
+Multi-seed leakage robustness check (5 eval seeds: bootstrap axis+held-out gender
+classifier, varied generation RNG; samples-per-alpha=32, label-stories=400, @60 ckpts).
+Held-out gender classifier = difference-of-means in frozen T5 embedding space,
+trained on real val stories, applied to generations. logit-shift is non-saturating.
+
+ k(code)  frac_range(old,sat)   logit_shift(non-sat)   gender_AUC        ctrl_delta
+ 512(M1)   0.756 +- 0.216        0.368 +- 0.055         0.762 +- 0.138    1.000
+ 256       0.787 +- 0.165        0.452 +- 0.122         0.741 +- 0.163    1.000
+ 64        0.919 +- 0.096        0.757 +- 0.295         0.766 +- 0.195    1.000
+ 16        0.981 +- 0.037        0.967 +- 0.148         0.987 +- 0.019    1.000
+
+Verdict:
+ - logit_shift: mean monotone increasing as k shrinks; endpoints (M1 vs k16)
+   SEPARATED (0.37+-0.06 vs 0.97+-0.15); all ADJACENT pairs OVERLAP at 5 eval seeds.
+ - frac_range: monotone in mean but high variance; the earlier single-seed M1=0.33
+   was a low-tail draw (robust ~0.76 frac / 0.37 logit).
+ - AUC: NOT monotone (M1~k256~k64 ~0.75, only k16 jumps to 0.99).
+ - on-target control delta = 1.000 at every k (robust).
+
+Correlation with superposition sent-gender interference (M1=.003,256=.047,64=.069,16=.083):
+   vs logit_shift: Pearson r=+0.908, Spearman=+1.00
+   vs AUC:         Pearson r=+0.614, Spearman=+0.80
+
+CAVEAT: these are EVAL seeds (same trained model). Model-level training seeds are
+NOT yet bootstrapped; adjacent-k separation needs them. Endpoints k={8,512} pending.
