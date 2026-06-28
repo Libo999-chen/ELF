@@ -60,8 +60,11 @@ motivating low-rank ``semantic manifold'' codes: such a code does \emph{not} mak
 generation more controllable or more disentangled than full-rank conditioning;
 on a decontaminated disentanglement test it is in fact \emph{worse}
 (\S\ref{sec:exp}). (iii) A mechanism---attribute \emph{superposition} induced by
-the bottleneck---supported by a code-dimension sweep, tying controllable
-generation to the superposition phenomenon of \cite{manifold2026}.
+the bottleneck---established both behaviorally (a monotonic code-dimension sweep)
+and \emph{directly}, by applying the Manifold Probe of \cite{manifold2026} to the
+code space and showing the measured superposition predicts off-target leakage
+(Pearson $r{=}0.995$), tying controllable generation to the superposition
+phenomenon.
 
 % ===========================================================================
 \section{Method}
@@ -341,6 +344,56 @@ offset distinct from the dimensionality trend.}
 \label{tab:ksweep}
 \end{table}
 
+\paragraph{Directly measuring superposition in code space.}
+The behavioral sweep shows leakage is monotone in $1/k$, but does not by itself
+prove the cause is \emph{superposition} rather than, say, a reduced capacity to
+represent any attribute at all. We test the mechanism directly with the
+\emph{Manifold Probe} of \cite{manifold2026}, applied to the code space. For each
+attribute $a\in\{$sentiment, gender, animal, length$\}$ with scalar label $z$, the
+probe learns the smooth features $f(z)=\bm\beta^\top h(z)$ that are linearly
+predictable from the codes $\cb$ (a generalized-eigenproblem closed form), together
+with their encoding directions, recovering the attribute's encoding \emph{subspace}
+$\mathcal{Q}_a\subseteq\R^{k}$; its \emph{manifold dimension} is the rank of that
+subspace. We quantify superposition geometrically: the pairwise interference
+$\mathrm{overlap}(\mathcal{Q}_a,\mathcal{Q}_b)$ (mean squared cosine of the
+principal angles, in $[0,1]$), its mean over off-diagonal pairs, and the
+\emph{capacity ratio} $\sum_a \dim\mathcal{Q}_a / k$ (concept dimensions packed per
+code dimension; $>1$ forces sharing). Metrics are averaged over five train/test
+splits on $N{=}1500$ held-out stories; we use readout (linear-probe) directions,
+the geometry that governs linear separability and hence leakage. On synthetic data
+the metrics read $\approx 0$ for attributes on orthogonal axes and large for
+attributes packed into a shared direction, so a positive value is not an artifact
+of small $k$ (we subtract the random-direction baseline $1/k$).
+
+Every superposition measure increases \emph{strictly monotonically} as $k$ shrinks
+(Table~\ref{tab:superpos}), in lockstep with leakage. The interference of the
+specific steering pair---sentiment vs.\ gender, the attributes that actually
+leak---rises from $0.003$ at $k{=}512$ to $0.083$ at $k{=}16$ and predicts leakage
+almost exactly (Pearson $r{=}0.995$; Spearman $\rho{=}1.0$ for all three measures
+across the four points). This converts the superposition account from an inference
+into a measurement: shrinking the code does not merely reduce capacity, it forces
+correlated attributes to \emph{share encoding directions}, and the amount of that
+sharing tracks how strongly steering one attribute drags the other.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{l ccccc}
+code dim $k$ & 512 (M1) & 256 & 64 & 16 & corr.\ leakage \\
+\hline
+sentiment--gender interference   & 0.003 & 0.047 & 0.069 & 0.083 & $r{=}0.995$ \\
+mean off-diagonal interference   & 0.017 & 0.045 & 0.055 & 0.122 & $r{=}0.848$ \\
+capacity ratio ($\sum\!\dim\mathcal{Q}_a/k$) & 0.008 & 0.021 & 0.100 & 0.388 & $r{=}0.724$ \\
+\hline
+off-target leakage (epoch 60)    & 0.33  & 0.75  & 0.875 & 1.00  & --- \\
+\end{tabular}
+\caption{Superposition measured directly in code space with the Manifold
+Probe~\cite{manifold2026} ($N{=}1500$ stories, 5 seeds). Every measure grows
+strictly monotonically as $k$ shrinks and is rank-correlated with off-target
+leakage at Spearman $\rho{=}1.0$; the sentiment--gender readout interference---the
+pair that leaks---tracks leakage at Pearson $r{=}0.995$. Endpoints $k\in\{8,512$
+learned$\}$ pending the 60-epoch runs.}
+\label{tab:superpos}
+\end{table}
+
 \paragraph{Takeaway.} Contrary to the intuition that a compact ``semantic
 manifold'' code yields cleaner, more disentangled control, we find the opposite:
 a low-rank conditioning code induces attribute superposition and \emph{worse}
@@ -349,7 +402,10 @@ single-factor controllability. The code-dimension sweep makes the mechanism
 quantitative: orthogonalized leakage is monotone in $1/k$, and the sweep further
 separates a dimensionality-driven trend from a smaller, roughly constant offset
 contributed by the learned parametrization itself (the learned $k{=}d$ code still
-leaks more than naive mean-pool conditioning). Together this reframes the
+leaks more than naive mean-pool conditioning). Probing the code space directly
+confirms the cause is superposition---the attributes' encoding subspaces overlap
+more as $k$ shrinks, and that overlap predicts leakage ($r{=}0.995$ for the pair
+that leaks)---rather than a generic loss of capacity. Together this reframes the
 contribution from a better controllable LM toward a study of how the geometry of
 the conditioning variable governs disentanglement---connecting controllable
 generation directly to the superposition phenomenon of \cite{manifold2026}.
