@@ -1,0 +1,20 @@
+Superposition probe (Manifold Probe, arXiv:2605.18537) on SM-ELF code space.
+N=1500 val stories, 5 train/test split seeds, degree-5 smooth basis.
+Concepts: sentiment, gender, animal, length. Metrics averaged over seeds.
+
+ k(code)  mean_off  sent-gender  capacity   leakage@60
+ 512(M1)   0.0172      0.0027      0.0078      0.33
+ 256       0.0451      0.0466      0.0211      0.750
+ 64        0.0552      0.0688      0.1000      0.875
+ 16        0.1218      0.0826      0.3875      1.00
+ 8         (pending @60)                       (pending)
+ 512-learn (pending @60)                       (pending)
+
+Correlation with off-target leakage (4 points):
+  sentiment-gender interference vs leakage: Pearson r=+0.995, Spearman=+1.00
+  mean off-diagonal interference vs leakage: Pearson r=+0.848, Spearman=+1.00
+  capacity ratio vs leakage:                 Pearson r=+0.724, Spearman=+1.00
+
+Every directly-measured superposition metric increases STRICTLY MONOTONICALLY as
+the code dimension k shrinks, in lockstep with off-target leakage. This turns the
+"leakage => superposition" claim from an inference into a measurement.
