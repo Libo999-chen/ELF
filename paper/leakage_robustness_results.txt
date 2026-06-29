@@ -38,3 +38,17 @@ Leakage logit_shift monotone for learned k=8..256; learned-512 is a high-varianc
 outlier (parametrization offset); M1 lowest. k=8 on-target CONTROL degrades to 0.63
 (capacity collapse). Correlation interference vs logit_shift: Pearson r=0.902 (all 6),
 r=0.965 / Spearman=1.0 excluding the learned-512 outlier.
+
+=== MITIGATION (decorrelation regularizer) — NEGATIVE RESULT ===
+lambda_dec * cos^2(u_sent, u_gen) on code-space difference-of-means axes (global batch),
+swept at k=64, matched budget (batch40 x grad_accum2 = eff 80).
+ lambda | training            | code-axis cos^2 | gender leakage (logit-shift, 5-seed) | control
+ 0 (base)| stable             | ~0.07           | 0.76 +- 0.30                          | 1.00
+ 1       | diverges ~ep57     | 0.13 -> 0.05    | 1.65 +- 0.35 (ckpt_70000, ep56)      | 0.93
+ 3       | diverges ~ep39 (l2->2.4)            | --                  | -- (no converged model)              | --
+ 10      | diverges ~ep45 (l2->5e4)           | --                  | --                                   | --
+Conclusion: decorrelation FAILS. (i) destabilizes flow training, earlier for larger lambda;
+(ii) at stable lambda=1 it lowers the code-axis cosine but RAISES generation leakage
+(readout geometry dissociated from generation). => entanglement is intrinsic to low-rank
+conditioning under correlated attributes, not a removable readout artifact. A fix must act
+on the generation pathway (e.g. decoder-output adversary), left to future work.
